@@ -1,0 +1,93 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: habical
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d habical"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./deploy/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        psql "postgres://postgres:postgres@postgres:5432/habical?sslmode=disable" -f /migrations/0001_init.sql
+    restart: "no"
+
+  auth:
+    build:
+      context: .
+      dockerfile: deploy/docker/auth.Dockerfile
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
+      JWT_SECRET: dev_secret_change_me
+      AUTH_PORT: 4011
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "4011:4011"
+
+  core:
+    build:
+      context: .
+      dockerfile: deploy/docker/core.Dockerfile
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
+      JWT_SECRET: dev_secret_change_me
+      CORE_PORT: 4012
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "4012:4012"
+
+  social:
+    build:
+      context: .
+      dockerfile: deploy/docker/social.Dockerfile
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
+      JWT_SECRET: dev_secret_change_me
+      SOCIAL_PORT: 4013
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "4013:4013"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/docker/gateway.Dockerfile
+    environment:
+      JWT_SECRET: dev_secret_change_me
+      GATEWAY_PORT: 4010
+      AUTH_URL: http://auth:4011
+      CORE_URL: http://core:4012
+      SOCIAL_URL: http://social:4013
+    depends_on:
+      - auth
+      - core
+      - social
+    ports:
+      - "4010:4010"
+
+volumes:
+  pg_data:

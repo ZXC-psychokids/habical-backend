@@ -1,0 +1,2576 @@
+openapi: 3.0.3
+info:
+  title: Habical API
+  version: 1.0.0
+  description: OpenAPI-спецификация для Habical, собранная в полном соответствии с
+    финальным текстовым описанием API. Если одна и та же ручка поддерживает несколько
+    сценариев через разные query-параметры, это явно описано в operation description.
+servers:
+- url: https://api.habical.app
+  description: Production
+- url: http://localhost:8080
+  description: Local development
+security:
+- bearerAuth: []
+tags:
+- name: Auth
+- name: Profile
+- name: Settings
+- name: Tasks
+- name: Habits
+- name: Shared Habits
+- name: Events
+- name: Event Categories
+- name: Friends
+- name: Friend Page
+- name: Feed
+paths:
+  /auth/register:
+    post:
+      tags:
+      - Auth
+      summary: Регистрация пользователя
+      description: 'Экран регистрации: почта, хендл, пароль, подтверждение пароля.
+
+
+        Server rules: validate email, ensure unique email and handle, verify password
+        confirmation, create default user settings, create refresh token, return access
+        and refresh tokens.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Пользователь зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /auth/login:
+    post:
+      tags:
+      - Auth
+      summary: Вход по почте или хендлу
+      description: 'Если login проходит валидацию как email, поиск идёт по email.
+
+        Иначе поиск идёт по handle.
+
+        '
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/refresh:
+    post:
+      tags:
+      - Auth
+      summary: Обновление access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Новая пара токенов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      description: 'Server rules: look up refresh token by hash, ensure it is not
+        expired and not revoked, revoke the old refresh token, create a new refresh
+        token, return a new token pair.'
+  /auth/logout:
+    post:
+      tags:
+      - Auth
+      summary: Выход из аккаунта
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '204':
+          description: Успешный выход
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/password-reset/request:
+    post:
+      tags:
+      - Auth
+      summary: Запрос восстановления пароля
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '200':
+          description: Инструкции отправлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /auth/password-reset/confirm:
+    post:
+      tags:
+      - Auth
+      summary: Подтверждение смены пароля
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: Пароль изменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /me:
+    get:
+      tags:
+      - Profile
+      summary: Текущий пользователь
+      responses:
+        '200':
+          description: Текущий пользователь
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/profile:
+    patch:
+      tags:
+      - Profile
+      summary: Обновление профиля
+      description: Обновляет email и/или handle текущего пользователя.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Профиль обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /me/avatar:
+    patch:
+      tags:
+      - Profile
+      summary: Смена аватарки
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Аватарка обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      description: 'Принимает multipart/form-data с обязательным полем `file`. Сервер
+        валидирует тип файла, сохраняет изображение в файловом хранилище, обновляет
+        `users.avatar_url` и возвращает обновлённого пользователя.
+
+
+        Server rules: validate file type, save file to media storage, update users.avatar_url,
+        return the updated user.'
+  /me/settings:
+    get:
+      tags:
+      - Settings
+      summary: Получение серверных настроек пользователя
+      responses:
+        '200':
+          description: Настройки пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/settings/privacy:
+    patch:
+      tags:
+      - Settings
+      summary: Обновление настроек приватности
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePrivacySettingsRequest'
+      responses:
+        '200':
+          description: Настройки приватности обновлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrivacySettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/settings/notifications:
+    patch:
+      tags:
+      - Settings
+      summary: Обновление настроек уведомлений
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNotificationSettingsRequest'
+      responses:
+        '200':
+          description: Настройки уведомлений обновлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/settings/calendar:
+    patch:
+      tags:
+      - Settings
+      summary: Обновление календарных настроек
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCalendarSettingsRequest'
+      responses:
+        '200':
+          description: Календарные настройки обновлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/tasks:
+    get:
+      tags:
+      - Tasks
+      summary: Список задач на день
+      description: 'Возвращает задачи текущего пользователя за конкретный день. Сортировка:
+        1) задачи с событием по `event.startsAt`, 2) задачи от привычек по `position`,
+        3) ручные задачи по `position`. Для задач с событием возвращается только минимальная
+        event-связь, достаточная для подписи по времени. `streakDays` в task-response
+        не возвращается.'
+      parameters:
+      - $ref: '#/components/parameters/DateQuery'
+      responses:
+        '200':
+          description: Список задач
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+      - Tasks
+      summary: Создание ручной задачи
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Задача создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/tasks/reorder:
+    post:
+      tags:
+      - Tasks
+      summary: Перестановка задач и перенос между днями
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderTasksRequest'
+      responses:
+        '200':
+          description: Порядок задач обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Server rules: all tasks must belong to the current user. The server
+        updates position and taskDate and normalizes positions inside each day.'
+  /me/tasks/{taskId}:
+    get:
+      tags:
+      - Tasks
+      summary: Получение задачи по id
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Задача
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Tasks
+      summary: Обновление задачи
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Задача обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Если у задачи есть `habit_id`, нельзя менять `title` и `manualColor`.
+        Если задача привязана к событию, нельзя менять `manualColor`. Ручной цвет
+        разрешён только для ручной задачи без события.
+
+
+        Server rules: if task has habit_id, title and manualColor cannot be changed.
+        If task is linked to an event, manualColor cannot be changed.'
+    delete:
+      tags:
+      - Tasks
+      summary: Удаление ручной задачи
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '204':
+          description: Задача удалена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Удалить можно только ручную задачу. Если ручная задача связана
+        с событием, сервер снимает `task_id` у события. Задачу привычки удалять нельзя.
+
+
+        Server rules: only manual tasks can be deleted. If a manual task is linked
+        to an event, the server clears event.task_id before deleting the task.'
+  /me/tasks/{taskId}/toggle:
+    post:
+      tags:
+      - Tasks
+      summary: Переключение статуса выполнения задачи
+      description: |
+        Инвертирует флаг выполнения задачи. Feed по streak не создаётся прямо в этом запросе: расчёт streak и создание соответствующих feed items выполняются фоновым Background Worker.
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Статус задачи изменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskToggleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/tasks/{taskId}/event-link:
+    post:
+      tags:
+      - Tasks
+      summary: Привязка задачи к существующему событию
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkTaskEventRequest'
+      responses:
+        '200':
+          description: Задача привязана к событию
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      description: 'Привязывает задачу к существующему событию. Событие и задача должны
+        принадлежать текущему пользователю. Если событие уже связано с другой задачей,
+        возвращается `409`. Связь задачи привычки с событием разрешена.
+
+
+        Server rules: selected event and task must belong to the current user. If
+        the event is already linked to another task, return 409. Linking a habit-generated
+        task to an event is allowed.'
+    delete:
+      tags:
+      - Tasks
+      summary: Удаление привязки задачи к событию
+      parameters:
+      - $ref: '#/components/parameters/TaskId'
+      responses:
+        '204':
+          description: Привязка удалена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/habits:
+    get:
+      tags:
+      - Habits
+      summary: Список привычек текущего пользователя
+      responses:
+        '200':
+          description: Список привычек
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HabitResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      description: Возвращает список привычек текущего пользователя. Сортировка по
+        `created_at` по возрастанию. `streakDays` вычисляется сервером. Если привычка
+        shared, сервер возвращает `sharedWith`.
+    post:
+      tags:
+      - Habits
+      summary: Создание привычки
+      description: |
+        Создаёт новую привычку. После создания привычки будущие задачи создаются фоновым Background Worker.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHabitRequest'
+      responses:
+        '201':
+          description: Привычка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      description: 'Server rules: if scheduleType is weekdays, weekdays is required.
+        Otherwise weekdays must be empty. The server creates future tasks for the
+        habit for the agreed planning horizon.'
+  /me/habits/calendar-summary:
+    get:
+      tags:
+      - Habits
+      summary: Календарная сводка привычек
+      description: Возвращает данные для мини-календаря на экране привычек. Используется
+        и для общего режима, и для режима выбранной привычки, где клиент фильтрует
+        уже полученные данные по `habitId`.
+      parameters:
+      - $ref: '#/components/parameters/FromDate'
+      - $ref: '#/components/parameters/ToDate'
+      responses:
+        '200':
+          description: Календарная сводка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitCalendarSummaryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/habits/{habitId}:
+    get:
+      tags:
+      - Habits
+      summary: Получение привычки по id
+      parameters:
+      - $ref: '#/components/parameters/HabitId'
+      responses:
+        '200':
+          description: Привычка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Habits
+      summary: Обновление привычки
+      description: |
+        Обновляет привычку. После изменения расписания пересборка будущих задач выполняется фоновым Background Worker.
+      parameters:
+      - $ref: '#/components/parameters/HabitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHabitRequest'
+      responses:
+        '200':
+          description: Привычка обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HabitResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Server rules: update the habit and rebuild only future tasks for
+        this habit. Past tasks are not recreated.'
+    delete:
+      tags:
+      - Habits
+      summary: Удаление привычки
+      parameters:
+      - $ref: '#/components/parameters/HabitId'
+      responses:
+        '204':
+          description: Привычка удалена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Server rules: delete the habit, delete future unfinished tasks
+        for this habit, and remove the shared pair if the habit belongs to one.'
+  /me/shared-habits:
+    post:
+      tags:
+      - Shared Habits
+      summary: Создание совместной привычки
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSharedHabitRequest'
+      responses:
+        '201':
+          description: Совместная привычка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSharedHabitResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/shared-habits/{sharedHabitPairId}:
+    get:
+      tags:
+      - Shared Habits
+      summary: Подробности по совместной привычке
+      parameters:
+      - $ref: '#/components/parameters/SharedHabitPairId'
+      responses:
+        '200':
+          description: Подробности shared habit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedHabitDetails'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/shared-habits/{sharedHabitPairId}/remind:
+    post:
+      tags:
+      - Shared Habits
+      summary: Напомнить другу о совместной привычке
+      parameters:
+      - $ref: '#/components/parameters/SharedHabitPairId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharedHabitRemindRequest'
+      responses:
+        '201':
+          description: Напоминание отправлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      description: 'Создаёт напоминание по совместной привычке. `taskId` должен относиться
+        к этой shared habit. Создаётся запись `shared_habit_reminder` и `feed_item`
+        типа `shared_habit_reminder`. Повторное напоминание по той же задаче в тот
+        же день запрещено.
+
+
+        Server rules: taskId must belong to this shared habit. The server creates
+        a shared_habit_reminder and a feed item of type shared_habit_reminder. Only
+        one reminder per task per day is allowed.'
+  /me/events:
+    get:
+      tags:
+      - Events
+      summary: Список событий текущего пользователя за диапазон
+      parameters:
+      - $ref: '#/components/parameters/FromDateTime'
+      - $ref: '#/components/parameters/ToDateTime'
+      responses:
+        '200':
+          description: Список событий
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      description: Возвращает события текущего пользователя, попадающие в диапазон
+        `from`–`to`, отсортированные по `starts_at`.
+    post:
+      tags:
+      - Events
+      summary: Создание события
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+      responses:
+        '201':
+          description: Событие создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      description: 'Server rules: if taskId is provided, the event is linked to the
+        task. If scheduleType is weekdays, weekdays is required; otherwise weekdays
+        must be empty.'
+  /me/events/{eventId}:
+    get:
+      tags:
+      - Events
+      summary: Получение события по id
+      parameters:
+      - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Событие
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Events
+      summary: Обновление события
+      parameters:
+      - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventRequest'
+      responses:
+        '200':
+          description: Событие обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Server rules: event color is derived from category. taskId is
+        not changed via this endpoint.'
+    delete:
+      tags:
+      - Events
+      summary: Удаление события
+      parameters:
+      - $ref: '#/components/parameters/EventId'
+      responses:
+        '204':
+          description: Событие удалено
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/events/{eventId}/move:
+    post:
+      tags:
+      - Events
+      summary: Перемещение события в календаре
+      parameters:
+      - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveEventRequest'
+      responses:
+        '200':
+          description: Событие перемещено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/event-categories:
+    get:
+      tags:
+      - Event Categories
+      summary: Список категорий событий
+      responses:
+        '200':
+          description: Список категорий
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventCategory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+      - Event Categories
+      summary: Создание категории события
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventCategoryRequest'
+      responses:
+        '201':
+          description: Категория создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventCategory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/event-categories/{categoryId}:
+    patch:
+      tags:
+      - Event Categories
+      summary: Обновление категории события
+      parameters:
+      - $ref: '#/components/parameters/CategoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventCategoryRequest'
+      responses:
+        '200':
+          description: Категория обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventCategory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Event Categories
+      summary: Удаление категории события
+      parameters:
+      - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '204':
+          description: Категория удалена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      description: 'Server rules: if the category is used by any events, the server
+        returns 409 Conflict.'
+  /me/friends:
+    get:
+      tags:
+      - Friends
+      summary: Список друзей
+      responses:
+        '200':
+          description: Список друзей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FriendListItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/friends/{friendUserId}:
+    delete:
+      tags:
+      - Friends
+      summary: Удаление друга
+      parameters:
+      - $ref: '#/components/parameters/FriendUserId'
+      responses:
+        '204':
+          description: Друг удалён
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/friend-invites:
+    get:
+      tags:
+      - Friends
+      summary: Входящие заявки в друзья
+      responses:
+        '200':
+          description: Список входящих заявок
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FriendInviteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+      - Friends
+      summary: Отправка заявки в друзья
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFriendInviteRequest'
+      responses:
+        '201':
+          description: Заявка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateFriendInviteResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /me/friend-invites/{inviteId}/accept:
+    post:
+      tags:
+      - Friends
+      summary: Принятие заявки в друзья
+      parameters:
+      - $ref: '#/components/parameters/InviteId'
+      responses:
+        '200':
+          description: Заявка принята
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptFriendInviteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      description: 'Server rules: mark the invite as accepted, create a friendship,
+        and create a feed item of type friend_added.'
+  /me/friend-invites/{inviteId}/reject:
+    post:
+      tags:
+      - Friends
+      summary: Отклонение заявки в друзья
+      parameters:
+      - $ref: '#/components/parameters/InviteId'
+      responses:
+        '204':
+          description: Заявка отклонена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /users/{userId}:
+    get:
+      tags:
+      - Friend Page
+      summary: Минимальный профиль пользователя
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Минимальный профиль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUser'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Возвращает минимальный профиль пользователя. Доступ разрешён только
+        если `userId` — это текущий пользователь или между пользователями существует
+        дружба.
+
+
+        Access is allowed only if userId is the current user or there is a friendship
+        between the current user and userId. Only minimal public fields are returned.'
+  /users/{userId}/tasks:
+    get:
+      tags:
+      - Friend Page
+      summary: Задачи друга за день
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/DateQuery'
+      responses:
+        '200':
+          description: Список задач друга
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FriendTaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Возвращает задачи друга за конкретный день для верхнего блока
+        friend page. Доступ только при наличии дружбы и если `share_habits = true`.
+        Сортировка как на home screen. В `event` возвращается только минимальная временная
+        связь.
+
+
+        Access requires friendship and share_habits = true for the requested user.'
+  /users/{userId}/events:
+    get:
+      tags:
+      - Friend Page
+      summary: События друга
+      description: 'Эта ручка используется в двух строго определённых сценариях.
+
+
+        1. Верхний блок на экране друга: передаётся только query-параметр `date`.
+        В этом режиме ответ содержит сокращённые объекты событий формата `FriendDayEventResponse`.
+
+
+        2. Календарь друга: передаются только query-параметры `from` и `to`. В этом
+        режиме ответ содержит полные объекты событий формата `EventResponse`.
+
+
+        Допустима только одна из двух комбинаций параметров: `date` или `from` + `to`.
+        Комбинации без параметров, `date` вместе с `from`/`to`, только `from`, только
+        `to` являются невалидными и должны приводить к `400`.
+
+
+        Valid query combinations are exactly one of: (1) date only; (2) from and to
+        together. Invalid combinations, including no parameters, date together with
+        from/to, only from, or only to, must return 400.'
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/DateQueryOptional'
+      - $ref: '#/components/parameters/FromDateTimeOptional'
+      - $ref: '#/components/parameters/ToDateTimeOptional'
+      responses:
+        '200':
+          description: Список событий друга в одном из двух поддерживаемых режимов.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/FriendDayEventResponse'
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/EventResponse'
+              examples:
+                friendDayEvents:
+                  summary: События друга за конкретный день для верхнего блока friend
+                    page
+                  value:
+                  - id: uuid
+                    title: Тренировка
+                    startsAt: '2026-04-17T08:00:00Z'
+                    endsAt: '2026-04-17T09:00:00Z'
+                    category:
+                      id: uuid
+                      title: Спорт
+                      color: '#FF3B30'
+                friendCalendarEvents:
+                  summary: Полные события друга для календарного диапазона
+                  value:
+                  - id: uuid
+                    title: Тренировка
+                    startsAt: '2026-04-17T08:00:00Z'
+                    endsAt: '2026-04-17T09:00:00Z'
+                    scheduleType: none
+                    intervalDays: 1
+                    weekdays: []
+                    category:
+                      id: uuid
+                      title: Спорт
+                      color: '#FF3B30'
+                    task:
+                      id: uuid
+                      title: Отжимания
+        '400':
+          description: Invalid query combination. Use either date only, or from and
+            to together.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: 'Invalid query combination: use either date or from+to'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /users/{userId}/shared-habits:
+    get:
+      tags:
+      - Friend Page
+      summary: Совместные привычки с другом
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Список совместных привычек
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SharedHabitListItem'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 'Возвращает только совместные привычки между текущим пользователем
+        и пользователем `userId`. Доступ только при наличии дружбы.
+
+
+        Access requires friendship. Only shared habits between the current user and
+        userId are returned.'
+  /me/feed:
+    get:
+      tags:
+      - Feed
+      summary: Лента новостей друзей
+      parameters:
+      - $ref: '#/components/parameters/FeedLimit'
+      - $ref: '#/components/parameters/FeedCursor'
+      responses:
+        '200':
+          description: Лента новостей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      description: 'Возвращает ленту новостей друзей. Сначала элементы `shared_habit_reminder`,
+        затем остальные по `created_at` по убыванию. Текст новости клиент собирает
+        сам по `type` и связанным данным.
+
+
+        The client builds visible feed text from type and linked structured data;
+        the API intentionally does not return a pre-rendered text field.'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор пользователя.
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор задачи.
+    HabitId:
+      name: habitId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор привычки.
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор события.
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор категории событий.
+    InviteId:
+      name: inviteId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор заявки в друзья.
+    FriendUserId:
+      name: friendUserId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор пользователя-друга.
+    SharedHabitPairId:
+      name: sharedHabitPairId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор пары совместной привычки.
+    DateQuery:
+      name: date
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+      description: Дата в формате YYYY-MM-DD.
+    DateQueryOptional:
+      name: date
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: Optional day selector. Use only for the friend page day block.
+        Must not be combined with from or to.
+    FromDate:
+      name: from
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+      description: Начальная дата диапазона в формате YYYY-MM-DD.
+    ToDate:
+      name: to
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+      description: Конечная дата диапазона в формате YYYY-MM-DD.
+    FromDateTime:
+      name: from
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date-time
+      description: Начальная дата-время диапазона в ISO 8601.
+    ToDateTime:
+      name: to
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date-time
+      description: Конечная дата-время диапазона в ISO 8601.
+    FromDateTimeOptional:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: Optional range start. Must be used together with to for friend
+        calendar mode. Must not be combined with date.
+    ToDateTimeOptional:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: Optional range end. Must be used together with from for friend
+        calendar mode. Must not be combined with date.
+    FeedLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Максимальное число элементов ленты в ответе.
+    FeedCursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Курсор для пагинации ленты.
+  responses:
+    BadRequest:
+      description: Ошибка валидации
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Неавторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Доступ запрещён
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Сущность не найдена
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Конфликт данных
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+      - message
+      properties:
+        message:
+          type: string
+      additionalProperties: false
+    MessageResponse:
+      type: object
+      required:
+      - message
+      properties:
+        message:
+          type: string
+      additionalProperties: false
+    UUIDRef:
+      type: string
+      format: uuid
+    User:
+      type: object
+      required:
+      - id
+      - email
+      - handle
+      - avatarUrl
+      - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        email:
+          type: string
+          format: email
+        handle:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    PublicUser:
+      type: object
+      required:
+      - id
+      - handle
+      - avatarUrl
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        handle:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+      additionalProperties: false
+    UserSettings:
+      allOf:
+      - $ref: '#/components/schemas/PrivacySettings'
+      - $ref: '#/components/schemas/NotificationSettings'
+      - $ref: '#/components/schemas/CalendarSettings'
+    PrivacySettings:
+      type: object
+      required:
+      - shareHabits
+      - shareCalendar
+      - shareNews
+      properties:
+        shareHabits:
+          type: boolean
+        shareCalendar:
+          type: boolean
+        shareNews:
+          type: boolean
+      additionalProperties: false
+    NotificationSettings:
+      type: object
+      required:
+      - notifyFriendRequests
+      - notifyHabitReminders
+      - notifyFriendsNews
+      properties:
+        notifyFriendRequests:
+          type: boolean
+        notifyHabitReminders:
+          type: boolean
+        notifyFriendsNews:
+          type: boolean
+      additionalProperties: false
+    CalendarSettings:
+      type: object
+      required:
+      - timezone
+      - weekStartsOn
+      properties:
+        timezone:
+          type: string
+          description: Valid IANA timezone identifier, for example Europe/Warsaw.
+          example: Europe/Warsaw
+        weekStartsOn:
+          type: integer
+          enum:
+          - 1
+          - 7
+      additionalProperties: false
+    RegisterRequest:
+      type: object
+      required:
+      - email
+      - handle
+      - password
+      - passwordConfirmation
+      properties:
+        email:
+          type: string
+          format: email
+        handle:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+        passwordConfirmation:
+          type: string
+          minLength: 1
+      additionalProperties: false
+      description: Payload for user registration.
+      example:
+        email: user@example.com
+        handle: vladimir
+        password: StrongPassword123
+        passwordConfirmation: StrongPassword123
+    LoginRequest:
+      type: object
+      required:
+      - login
+      - password
+      properties:
+        login:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+      additionalProperties: false
+      description: Payload for login by email or handle.
+      example:
+        login: user@example.com
+        password: StrongPassword123
+    RefreshRequest:
+      type: object
+      required:
+      - refreshToken
+      properties:
+        refreshToken:
+          type: string
+      additionalProperties: false
+      description: Payload with refresh token.
+      example:
+        refreshToken: jwt_refresh
+    PasswordResetRequest:
+      type: object
+      required:
+      - email
+      properties:
+        email:
+          type: string
+          format: email
+      additionalProperties: false
+      description: Payload for requesting password reset by email.
+      example:
+        email: user@example.com
+    PasswordResetConfirmRequest:
+      type: object
+      required:
+      - token
+      - newPassword
+      - newPasswordConfirmation
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          minLength: 1
+        newPasswordConfirmation:
+          type: string
+          minLength: 1
+      additionalProperties: false
+      description: Payload for confirming password reset.
+      example:
+        token: reset_token
+        newPassword: NewStrongPassword123
+        newPasswordConfirmation: NewStrongPassword123
+    TokenPair:
+      type: object
+      required:
+      - accessToken
+      - refreshToken
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+      additionalProperties: false
+    AuthSuccessResponse:
+      type: object
+      required:
+      - user
+      - settings
+      - tokens
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        settings:
+          $ref: '#/components/schemas/UserSettings'
+        tokens:
+          $ref: '#/components/schemas/TokenPair'
+      additionalProperties: false
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        email:
+          type: string
+          format: email
+        handle:
+          type: string
+          minLength: 1
+      additionalProperties: false
+      description: Partial update of current user profile.
+      example:
+        email: new@example.com
+        handle: newhandle
+    UpdatePrivacySettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        shareHabits:
+          type: boolean
+        shareCalendar:
+          type: boolean
+        shareNews:
+          type: boolean
+      additionalProperties: false
+      description: Partial update of privacy settings.
+      example:
+        shareHabits: true
+        shareCalendar: false
+        shareNews: true
+    UpdateNotificationSettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        notifyFriendRequests:
+          type: boolean
+        notifyHabitReminders:
+          type: boolean
+        notifyFriendsNews:
+          type: boolean
+      additionalProperties: false
+      description: Partial update of notification settings.
+      example:
+        notifyFriendRequests: true
+        notifyHabitReminders: false
+        notifyFriendsNews: true
+    UpdateCalendarSettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        timezone:
+          type: string
+          description: Valid IANA timezone identifier, for example Europe/Warsaw.
+          example: Europe/Warsaw
+        weekStartsOn:
+          type: integer
+          enum:
+          - 1
+          - 7
+      additionalProperties: false
+      description: Partial update of calendar settings.
+      example:
+        timezone: Europe/Warsaw
+        weekStartsOn: 1
+    HabitShort:
+      type: object
+      required:
+      - id
+      - title
+      - color
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        color:
+          type: string
+      additionalProperties: false
+    EventTimeLink:
+      type: object
+      required:
+      - id
+      - startsAt
+      - endsAt
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    TaskResponse:
+      type: object
+      required:
+      - id
+      - title
+      - taskDate
+      - position
+      - isCompleted
+      - habit
+      - event
+      - manualColor
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        taskDate:
+          type: string
+          format: date
+        position:
+          type: integer
+          minimum: 0
+        isCompleted:
+          type: boolean
+        manualColor:
+          type: string
+          nullable: true
+        habit:
+          allOf:
+          - nullable: true
+          - $ref: '#/components/schemas/HabitShort'
+        event:
+          allOf:
+          - nullable: true
+          - $ref: '#/components/schemas/EventTimeLink'
+      additionalProperties: false
+    FriendTaskResponse:
+      type: object
+      required:
+      - id
+      - title
+      - isCompleted
+      - habit
+      - event
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        isCompleted:
+          type: boolean
+        habit:
+          allOf:
+          - nullable: true
+          - $ref: '#/components/schemas/HabitShort'
+        event:
+          allOf:
+          - nullable: true
+          - $ref: '#/components/schemas/EventTimeLink'
+      additionalProperties: false
+    CreateTaskRequest:
+      type: object
+      required:
+      - title
+      - taskDate
+      - manualColor
+      - position
+      properties:
+        title:
+          type: string
+          minLength: 1
+        taskDate:
+          type: string
+          format: date
+        manualColor:
+          type: string
+        position:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+      description: Payload for creating a manual task.
+      example:
+        title: Купить воду
+        taskDate: '2026-04-17'
+        manualColor: '#0A84FF'
+        position: 5
+    UpdateTaskRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+        taskDate:
+          type: string
+          format: date
+        manualColor:
+          type: string
+        position:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+      description: Partial update of a task.
+      example:
+        title: Купить воду и хлеб
+        taskDate: '2026-04-18'
+        manualColor: '#FFD60A'
+        position: 2
+    ReorderTasksRequest:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+            - taskId
+            - position
+            - taskDate
+            properties:
+              taskId:
+                $ref: '#/components/schemas/UUIDRef'
+              position:
+                type: integer
+                minimum: 0
+              taskDate:
+                type: string
+                format: date
+            additionalProperties: false
+      additionalProperties: false
+      description: Payload for reordering tasks and moving them between days.
+    LinkTaskEventRequest:
+      type: object
+      required:
+      - eventId
+      properties:
+        eventId:
+          $ref: '#/components/schemas/UUIDRef'
+      additionalProperties: false
+      description: Payload for attaching an existing event to a task.
+      example:
+        eventId: uuid
+    TaskToggleResponse:
+      type: object
+      required:
+      - id
+      - isCompleted
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        isCompleted:
+          type: boolean
+      additionalProperties: false
+    HabitScheduleType:
+      type: string
+      enum:
+      - daily
+      - interval
+      - weekdays
+    HabitResponse:
+      type: object
+      required:
+      - id
+      - title
+      - color
+      - scheduleType
+      - intervalDays
+      - weekdays
+      - isShared
+      - streakDays
+      - sharedWith
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        color:
+          type: string
+        scheduleType:
+          $ref: '#/components/schemas/HabitScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        isShared:
+          type: boolean
+        sharedWith:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/PublicUser'
+        streakDays:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    CreateHabitRequest:
+      type: object
+      required:
+      - title
+      - color
+      - scheduleType
+      - intervalDays
+      - weekdays
+      properties:
+        title:
+          type: string
+          minLength: 1
+        color:
+          type: string
+        scheduleType:
+          $ref: '#/components/schemas/HabitScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+      additionalProperties: false
+      description: Payload for creating a habit.
+      example:
+        title: Чтение
+        color: '#0A84FF'
+        scheduleType: weekdays
+        intervalDays: 1
+        weekdays:
+        - 1
+        - 3
+        - 5
+    UpdateHabitRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+        color:
+          type: string
+        scheduleType:
+          $ref: '#/components/schemas/HabitScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+      additionalProperties: false
+      description: Partial update of a habit.
+      example:
+        title: Чтение книг
+        color: '#BF5AF2'
+        scheduleType: interval
+        intervalDays: 2
+        weekdays: []
+    HabitCalendarSummaryResponse:
+      type: object
+      required:
+      - days
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            required:
+            - date
+            - completedHabits
+            properties:
+              date:
+                type: string
+                format: date
+              completedHabits:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - habitId
+                  - color
+                  properties:
+                    habitId:
+                      $ref: '#/components/schemas/UUIDRef'
+                    color:
+                      type: string
+      additionalProperties: false
+    CreateSharedHabitRequest:
+      type: object
+      required:
+      - friendUserId
+      - title
+      - color
+      - scheduleType
+      - intervalDays
+      - weekdays
+      properties:
+        friendUserId:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+          minLength: 1
+        color:
+          type: string
+        scheduleType:
+          $ref: '#/components/schemas/HabitScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+      additionalProperties: false
+      description: Payload for creating a shared habit with a friend.
+      example:
+        friendUserId: uuid
+        title: Футбол
+        color: '#34C759'
+        scheduleType: weekdays
+        intervalDays: 1
+        weekdays:
+        - 2
+        - 4
+        - 6
+    CreateSharedHabitResponse:
+      type: object
+      required:
+      - sharedHabitPairId
+      - firstHabit
+      - secondHabit
+      properties:
+        sharedHabitPairId:
+          $ref: '#/components/schemas/UUIDRef'
+        firstHabit:
+          $ref: '#/components/schemas/HabitShort'
+        secondHabit:
+          $ref: '#/components/schemas/HabitShort'
+      additionalProperties: false
+    SharedHabitListItem:
+      type: object
+      required:
+      - sharedHabitPairId
+      - habitId
+      - title
+      - color
+      - streakDays
+      - youCompletedToday
+      - friendCompletedToday
+      properties:
+        sharedHabitPairId:
+          $ref: '#/components/schemas/UUIDRef'
+        habitId:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        color:
+          type: string
+        streakDays:
+          type: integer
+          minimum: 0
+        youCompletedToday:
+          type: boolean
+        friendCompletedToday:
+          type: boolean
+      additionalProperties: false
+    SharedHabitDetails:
+      type: object
+      required:
+      - sharedHabitPairId
+      - title
+      - color
+      - streakDays
+      - youCompletedToday
+      - friendCompletedToday
+      - you
+      - friend
+      properties:
+        sharedHabitPairId:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        color:
+          type: string
+        streakDays:
+          type: integer
+          minimum: 0
+        youCompletedToday:
+          type: boolean
+        friendCompletedToday:
+          type: boolean
+        you:
+          $ref: '#/components/schemas/PublicUser'
+        friend:
+          $ref: '#/components/schemas/PublicUser'
+      additionalProperties: false
+    SharedHabitRemindRequest:
+      type: object
+      required:
+      - taskId
+      properties:
+        taskId:
+          $ref: '#/components/schemas/UUIDRef'
+      additionalProperties: false
+      description: Payload for sending a reminder for a shared habit task.
+      example:
+        taskId: uuid
+    EventScheduleType:
+      type: string
+      enum:
+      - none
+      - daily
+      - interval
+      - weekdays
+      - monthly
+    EventCategory:
+      type: object
+      required:
+      - id
+      - title
+      - color
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        color:
+          type: string
+      additionalProperties: false
+    EventTaskLink:
+      type: object
+      required:
+      - id
+      - title
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+      additionalProperties: false
+    EventResponse:
+      type: object
+      required:
+      - id
+      - title
+      - startsAt
+      - endsAt
+      - scheduleType
+      - intervalDays
+      - weekdays
+      - category
+      - task
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        scheduleType:
+          $ref: '#/components/schemas/EventScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        category:
+          $ref: '#/components/schemas/EventCategory'
+        task:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/EventTaskLink'
+      additionalProperties: false
+    CreateEventRequest:
+      type: object
+      required:
+      - title
+      - startsAt
+      - endsAt
+      - scheduleType
+      - intervalDays
+      - weekdays
+      - categoryId
+      - taskId
+      properties:
+        title:
+          type: string
+          minLength: 1
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        scheduleType:
+          $ref: '#/components/schemas/EventScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        categoryId:
+          $ref: '#/components/schemas/UUIDRef'
+        taskId:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/UUIDRef'
+      additionalProperties: false
+      description: Payload for creating an event.
+      example:
+        title: Диетолог
+        startsAt: '2026-04-17T10:00:00Z'
+        endsAt: '2026-04-17T11:00:00Z'
+        scheduleType: monthly
+        intervalDays: 1
+        weekdays: []
+        categoryId: uuid
+        taskId: null
+    UpdateEventRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        scheduleType:
+          $ref: '#/components/schemas/EventScheduleType'
+        intervalDays:
+          type: integer
+          minimum: 1
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        categoryId:
+          $ref: '#/components/schemas/UUIDRef'
+      additionalProperties: false
+      description: Partial update of an event.
+      example:
+        title: Тренировка в зале
+        startsAt: '2026-04-17T08:30:00Z'
+        endsAt: '2026-04-17T09:30:00Z'
+        scheduleType: weekdays
+        intervalDays: 1
+        weekdays:
+        - 2
+        - 4
+        categoryId: uuid
+    MoveEventRequest:
+      type: object
+      required:
+      - startsAt
+      - endsAt
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+      description: Payload for moving an event in calendar.
+      example:
+        startsAt: '2026-04-18T12:00:00Z'
+        endsAt: '2026-04-18T13:00:00Z'
+    CreateEventCategoryRequest:
+      type: object
+      required:
+      - title
+      - color
+      properties:
+        title:
+          type: string
+          minLength: 1
+        color:
+          type: string
+      additionalProperties: false
+      description: Payload for creating an event category.
+      example:
+        title: Работа
+        color: '#FF9F0A'
+    UpdateEventCategoryRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+        color:
+          type: string
+      additionalProperties: false
+      description: Partial update of an event category.
+      example:
+        title: Рабочие встречи
+        color: '#AF52DE'
+    FriendListItem:
+      type: object
+      required:
+      - user
+      - sharedHabitsCount
+      properties:
+        user:
+          $ref: '#/components/schemas/PublicUser'
+        sharedHabitsCount:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    FriendInviteResponse:
+      type: object
+      required:
+      - id
+      - sender
+      - status
+      - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        sender:
+          $ref: '#/components/schemas/PublicUser'
+        status:
+          type: string
+          enum:
+          - pending
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateFriendInviteRequest:
+      type: object
+      required:
+      - handle
+      properties:
+        handle:
+          type: string
+          minLength: 1
+      additionalProperties: false
+      description: Payload for creating a friend invite by handle.
+      example:
+        handle: kirill
+    CreateFriendInviteResponse:
+      type: object
+      required:
+      - id
+      - status
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        status:
+          type: string
+          enum:
+          - pending
+      additionalProperties: false
+    AcceptFriendInviteResponse:
+      type: object
+      required:
+      - friendshipId
+      properties:
+        friendshipId:
+          $ref: '#/components/schemas/UUIDRef'
+      additionalProperties: false
+    FeedItemType:
+      type: string
+      enum:
+      - friend_added
+      - habit_streak
+      - habit_created
+      - shared_habit_reminder
+    FeedItemResponse:
+      type: object
+      required:
+      - id
+      - type
+      - actor
+      - relatedUser
+      - relatedHabit
+      - streakValue
+      - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        type:
+          $ref: '#/components/schemas/FeedItemType'
+        actor:
+          $ref: '#/components/schemas/PublicUser'
+        relatedUser:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/PublicUser'
+        relatedHabit:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/HabitShort'
+        streakValue:
+          type: integer
+          nullable: true
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+      description: Structured feed item without a pre-rendered text field. The client
+        assembles visible text from type and linked data.
+    FeedResponse:
+      type: object
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedItemResponse'
+        nextCursor:
+          type: string
+          nullable: true
+      additionalProperties: false
+    FriendDayEventResponse:
+      type: object
+      required:
+      - id
+      - title
+      - startsAt
+      - endsAt
+      - category
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDRef'
+        title:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        category:
+          $ref: '#/components/schemas/EventCategory'
+      example:
+        id: uuid
+        title: Тренировка
+        startsAt: '2026-04-17T08:00:00Z'
+        endsAt: '2026-04-17T09:00:00Z'
+        category:
+          id: uuid
+          title: Спорт
+          color: '#FF3B30'
+      additionalProperties: false
