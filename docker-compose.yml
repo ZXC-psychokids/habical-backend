@@ -72,6 +72,20 @@ services:
     ports:
       - "4013:4013"
 
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
+      WORKER_POLL_INTERVAL_SECONDS: "5"
+      WORKER_BATCH_SIZE: "10"
+      WORKER_RETRY_DELAY_SECONDS: "60"
+      WORKER_MAX_ATTEMPTS: "3"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   gateway:
     build:
       context: .

@@ -2,6 +2,7 @@ package habits
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -157,6 +158,10 @@ func (h *Handler) handleCreateHabit(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
 			return
 		}
+	}
+	if err := h.createBackgroundJob(r.Context(), tx, idgen.New(), "generate_future_tasks", map[string]string{"habitId": habitID}, time.Now().UTC()); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
@@ -344,6 +349,7 @@ func (h *Handler) handlePatchHabit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	needRebuild := req.ScheduleType != nil || req.IntervalDays != nil || req.Weekdays != nil
 	if req.Weekdays != nil {
 		if _, err := tx.Exec(r.Context(), `DELETE FROM habit_weekdays WHERE habit_id = $1`, habitID); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
@@ -361,6 +367,12 @@ func (h *Handler) handlePatchHabit(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(), `DELETE FROM tasks WHERE habit_id = $1 AND task_date >= $2 AND is_completed = FALSE`, habitID, today); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
 		return
+	}
+	if needRebuild {
+		if err := h.createBackgroundJob(r.Context(), tx, idgen.New(), "rebuild_future_tasks", map[string]string{"habitId": habitID}, time.Now().UTC()); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			return
+		}
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -608,6 +620,18 @@ func insertHabitWeekdays(ctx context.Context, tx pgx.Tx, habitID string, weekday
 		}
 	}
 	return nil
+}
+
+func (h *Handler) createBackgroundJob(ctx context.Context, tx pgx.Tx, jobID string, jobType string, payload any, runAt time.Time) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+        INSERT INTO background_jobs (id, type, payload, status, run_at, attempts, created_at, updated_at)
+        VALUES ($1, $2, $3, 'pending', $4, 0, now(), now())
+    `, jobID, jobType, raw, runAt)
+	return err
 }
 
 func (h *Handler) calculateHabitStreak(ctx context.Context, habitID string, schedule habitScheduleInfo) (int, error) {
