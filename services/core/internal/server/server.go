@@ -13,6 +13,10 @@ import (
 	"habical/backend/libs/httpx"
 	"habical/backend/libs/idgen"
 	"habical/backend/services/core/internal/config"
+	"habical/backend/services/core/internal/friendpage"
+	"habical/backend/services/core/internal/habits"
+	"habical/backend/services/core/internal/sharedhabits"
+	"habical/backend/services/core/internal/tasks"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -34,6 +38,11 @@ func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(s.authMiddleware)
 
+	tasks.New(s.pool).RegisterRoutes(r)
+	habits.New(s.pool).RegisterRoutes(r)
+	sharedhabits.New(s.pool).RegisterRoutes(r)
+	friendpage.New(s.pool).RegisterRoutes(r)
+
 	r.Get("/me/events", s.handleGetMyEvents)
 	r.Post("/me/events", s.handleCreateEvent)
 	r.Get("/me/events/{eventId}", s.handleGetEvent)
@@ -51,9 +60,7 @@ func (s *Server) Router() http.Handler {
 	return r
 }
 
-type ctxKey string
-
-const userIDKey ctxKey = "user_id"
+const userIDKey = "user_id"
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
