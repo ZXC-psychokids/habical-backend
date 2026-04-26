@@ -248,7 +248,7 @@ func (s *Server) handleFriendPageTasksNotReady(w http.ResponseWriter, r *http.Re
 			return
 		}
 	}
-	httpx.WriteError(w, http.StatusNotImplemented, "Endpoint ожидает модуль tasks (зона Участника 1)")
+	s.forward(w, r, s.cfg.CoreURL)
 }
 
 func (s *Server) handleFriendPageSharedHabitsNotReady(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +259,18 @@ func (s *Server) handleFriendPageSharedHabitsNotReady(w http.ResponseWriter, r *
 		httpx.WriteError(w, code, message)
 		return
 	}
-	httpx.WriteError(w, http.StatusNotImplemented, "Endpoint ожидает модуль sharedhabits (зона Участника 1)")
+	if requester != targetUserID {
+		settings, err := s.fetchUserSettings(r.Context(), targetUserID)
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadGateway, "Не удалось проверить настройки приватности")
+			return
+		}
+		if !settings.ShareHabits {
+			httpx.WriteError(w, http.StatusForbidden, "Привычки скрыты настройками приватности")
+			return
+		}
+	}
+	s.forward(w, r, s.cfg.CoreURL)
 }
 
 func (s *Server) checkFriendAccess(r *http.Request, requester string, target string) (bool, int, string) {
