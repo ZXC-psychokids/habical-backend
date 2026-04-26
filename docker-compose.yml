@@ -27,7 +27,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        psql "postgres://postgres:postgres@postgres:5432/habical?sslmode=disable" -f /migrations/0001_init.sql
+        psql "postgres://postgres:postgres@postgres:5432/habical?sslmode=disable" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
     restart: "no"
 
   auth:

@@ -69,6 +69,30 @@ func (s *Server) Router() http.Handler {
 		pr.MethodFunc(http.MethodPatch, "/me/event-categories/{categoryId}", s.forwardTo(s.cfg.CoreURL))
 		pr.MethodFunc(http.MethodDelete, "/me/event-categories/{categoryId}", s.forwardTo(s.cfg.CoreURL))
 
+		// Tasks.
+		pr.MethodFunc(http.MethodGet, "/me/tasks", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPost, "/me/tasks", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodGet, "/me/tasks/{taskId}", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPatch, "/me/tasks/{taskId}", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodDelete, "/me/tasks/{taskId}", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPost, "/me/tasks/{taskId}/toggle", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPost, "/me/tasks/reorder", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPost, "/me/tasks/{taskId}/event-link", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodDelete, "/me/tasks/{taskId}/event-link", s.forwardTo(s.cfg.CoreURL))
+
+		// Habits.
+		pr.MethodFunc(http.MethodGet, "/me/habits", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPost, "/me/habits", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodGet, "/me/habits/calendar-summary", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodGet, "/me/habits/{habitId}", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPatch, "/me/habits/{habitId}", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodDelete, "/me/habits/{habitId}", s.forwardTo(s.cfg.CoreURL))
+
+		// Shared habits.
+		pr.MethodFunc(http.MethodPost, "/me/shared-habits", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodGet, "/me/shared-habits/{sharedHabitPairId}", s.forwardTo(s.cfg.CoreURL))
+		pr.MethodFunc(http.MethodPost, "/me/shared-habits/{sharedHabitPairId}/remind", s.forwardTo(s.cfg.CoreURL))
+
 		// Social.
 		pr.MethodFunc(http.MethodGet, "/me/friends", s.forwardTo(s.cfg.SocialURL))
 		pr.MethodFunc(http.MethodDelete, "/me/friends/{friendUserId}", s.forwardTo(s.cfg.SocialURL))

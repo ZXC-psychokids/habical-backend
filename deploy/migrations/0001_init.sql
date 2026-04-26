@@ -150,11 +150,12 @@ CREATE TABLE IF NOT EXISTS shared_habit_reminders (
     recipient_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL,
+    created_date date GENERATED ALWAYS AS ((created_at AT TIME ZONE 'UTC')::date) STORED,
     CHECK (sender_user_id <> recipient_user_id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_shared_habit_reminders_task_day
-ON shared_habit_reminders (task_id, date(created_at));
+ON shared_habit_reminders (task_id, created_date);
 
 CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
     id uuid PRIMARY KEY,
