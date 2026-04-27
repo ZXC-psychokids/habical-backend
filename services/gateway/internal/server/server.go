@@ -105,8 +105,8 @@ func (s *Server) Router() http.Handler {
 		// Friend page orchestration.
 		pr.MethodFunc(http.MethodGet, "/users/{userId}", s.handleFriendPageUser)
 		pr.MethodFunc(http.MethodGet, "/users/{userId}/events", s.handleFriendPageEvents)
-		pr.MethodFunc(http.MethodGet, "/users/{userId}/tasks", s.handleFriendPageTasksNotReady)
-		pr.MethodFunc(http.MethodGet, "/users/{userId}/shared-habits", s.handleFriendPageSharedHabitsNotReady)
+		pr.MethodFunc(http.MethodGet, "/users/{userId}/tasks", s.handleFriendPageTasks)
+		pr.MethodFunc(http.MethodGet, "/users/{userId}/shared-habits", s.handleFriendPageSharedHabits)
 	})
 
 	return r
@@ -253,14 +253,16 @@ func (s *Server) handleFriendPageEvents(w http.ResponseWriter, r *http.Request) 
 	s.forward(w, r, s.cfg.CoreURL)
 }
 
-func (s *Server) handleFriendPageTasksNotReady(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFriendPageTasks(w http.ResponseWriter, r *http.Request) {
 	requester := userIDFromContext(r.Context())
 	targetUserID := chi.URLParam(r, "userId")
+
 	allowed, code, message := s.checkFriendAccess(r, requester, targetUserID)
 	if !allowed {
 		httpx.WriteError(w, code, message)
 		return
 	}
+
 	if requester != targetUserID {
 		settings, err := s.fetchUserSettings(r.Context(), targetUserID)
 		if err != nil {
@@ -275,14 +277,16 @@ func (s *Server) handleFriendPageTasksNotReady(w http.ResponseWriter, r *http.Re
 	s.forward(w, r, s.cfg.CoreURL)
 }
 
-func (s *Server) handleFriendPageSharedHabitsNotReady(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFriendPageSharedHabits(w http.ResponseWriter, r *http.Request) {
 	requester := userIDFromContext(r.Context())
 	targetUserID := chi.URLParam(r, "userId")
+
 	allowed, code, message := s.checkFriendAccess(r, requester, targetUserID)
 	if !allowed {
 		httpx.WriteError(w, code, message)
 		return
 	}
+
 	if requester != targetUserID {
 		settings, err := s.fetchUserSettings(r.Context(), targetUserID)
 		if err != nil {
