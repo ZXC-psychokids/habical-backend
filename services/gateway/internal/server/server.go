@@ -34,6 +34,7 @@ func New(cfg config.Config) *Server {
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(corsMiddleware)
 
 	// Auth public routes.
 	r.MethodFunc(http.MethodPost, "/auth/register", s.forwardTo(s.cfg.AuthURL))
@@ -110,6 +111,34 @@ func (s *Server) Router() http.Handler {
 	})
 
 	return r
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set(
+			"Access-Control-Allow-Headers",
+			"Authorization, Content-Type, Accept, Origin, X-Requested-With",
+		)
+		w.Header().Set(
+			"Access-Control-Allow-Methods",
+			"GET, POST, PATCH, DELETE, OPTIONS",
+		)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 type ctxKey string
