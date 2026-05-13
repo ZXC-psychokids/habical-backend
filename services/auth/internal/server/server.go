@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	_ "time/tzdata"
 
 	"habical/backend/libs/authjwt"
 	"habical/backend/libs/httpx"
