@@ -43,6 +43,13 @@ func (s *Server) Router() http.Handler {
 	r.Post("/auth/logout", s.handleLogout)
 	r.Post("/auth/password-reset/request", s.handlePasswordResetRequest)
 	r.Post("/auth/password-reset/confirm", s.handlePasswordResetConfirm)
+	r.Handle(
+		"/avatars/*",
+		http.StripPrefix(
+			"/avatars/",
+			http.FileServer(http.Dir(s.cfg.AvatarDir)),
+		),
+	)
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(s.authMiddleware)

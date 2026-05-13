@@ -37,6 +37,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(corsMiddleware)
 
 	// Auth public routes.
+	r.MethodFunc(http.MethodGet, "/avatars/*", s.forwardTo(s.cfg.AuthURL))
 	r.MethodFunc(http.MethodPost, "/auth/register", s.forwardTo(s.cfg.AuthURL))
 	r.MethodFunc(http.MethodPost, "/auth/login", s.forwardTo(s.cfg.AuthURL))
 	r.MethodFunc(http.MethodPost, "/auth/refresh", s.forwardTo(s.cfg.AuthURL))
