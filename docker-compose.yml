@@ -38,11 +38,15 @@ services:
       POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
       JWT_SECRET: dev_secret_change_me
       AUTH_PORT: 4011
+      AVATAR_STORAGE_DIR: /data/avatars
+      AVATAR_BASE_URL: http://localhost:4010/avatars
     depends_on:
       migrate:
         condition: service_completed_successfully
     ports:
       - "4011:4011"
+    volumes:
+      - auth_avatars:/data/avatars
 
   core:
     build:
@@ -105,3 +109,4 @@ services:
 
 volumes:
   pg_data:
+  auth_avatars:
