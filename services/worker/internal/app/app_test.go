@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"habical/backend/libs/logger"
 	"habical/backend/services/worker/internal/config"
 	"habical/backend/services/worker/internal/repository"
 )
@@ -54,7 +55,7 @@ func TestIsHabitScheduledForDate(t *testing.T) {
 		},
 	}
 
-	app := New(nil, config.Config{})
+	app := New(nil, config.Config{}, logger.New("worker-test"))
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := app.isHabitScheduledForDate(tc.habit, tc.date)

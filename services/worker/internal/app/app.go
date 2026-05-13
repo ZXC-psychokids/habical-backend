@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"habical/backend/libs/idgen"
@@ -15,6 +15,7 @@ import (
 type App struct {
 	repo *repository.Repository
 	cfg  config.Config
+	log  *slog.Logger
 }
 
 type habitJobPayload struct {
@@ -27,8 +28,8 @@ type streakJobPayload struct {
 	UserID  string `json:"userId,omitempty"`
 }
 
-func New(repo *repository.Repository, cfg config.Config) *App {
-	return &App{repo: repo, cfg: cfg}
+func New(repo *repository.Repository, cfg config.Config, log *slog.Logger) *App {
+	return &App{repo: repo, cfg: cfg, log: log}
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -37,7 +38,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	for {
 		if err := a.processDueJobs(ctx); err != nil {
-			log.Println("worker: failed to process jobs:", err)
+			a.log.Error("worker_process_due_jobs_failed", "error", err.Error())
 		}
 
 		select {
@@ -60,13 +61,13 @@ func (a *App) processDueJobs(ctx context.Context) error {
 	for _, job := range jobs {
 		if err := a.processJob(ctx, job); err != nil {
 			if err2 := a.repo.MarkJobFailed(ctx, job.ID, job.Attempts, a.cfg.RetryDelay, a.cfg.MaxAttempts); err2 != nil {
-				log.Println("worker: failed to mark job failed:", err2)
+				a.log.Error("worker_mark_job_failed_failed", "job_id", job.ID, "job_type", job.Type, "error", err2.Error())
 			}
-			log.Printf("worker: job %s failed: %v", job.ID, err)
+			a.log.Error("job_failed", "job_id", job.ID, "job_type", job.Type, "error", err.Error())
 			continue
 		}
 		if err := a.repo.MarkJobCompleted(ctx, job.ID); err != nil {
-			log.Println("worker: failed to mark job completed:", err)
+			a.log.Error("worker_mark_job_completed_failed", "job_id", job.ID, "job_type", job.Type, "error", err.Error())
 		}
 	}
 	return nil

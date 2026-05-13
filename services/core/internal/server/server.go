@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"habical/backend/libs/authjwt"
 	"habical/backend/libs/httpx"
 	"habical/backend/libs/idgen"
+	"habical/backend/libs/logger"
 	"habical/backend/services/core/internal/config"
 	"habical/backend/services/core/internal/friendpage"
 	"habical/backend/services/core/internal/habits"
@@ -28,14 +30,17 @@ var allowedEventSchedules = []string{"none", "daily", "interval", "weekdays", "m
 type Server struct {
 	cfg  config.Config
 	pool *pgxpool.Pool
+	log  *slog.Logger
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool) *Server {
-	return &Server{cfg: cfg, pool: pool}
+func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, pool: pool, log: log}
 }
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(logger.RequestID)
+	r.Use(logger.HTTPLogger(s.log))
 	r.Use(s.authMiddleware)
 
 	tasks.New(s.pool).RegisterRoutes(r)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/mail"
@@ -17,6 +18,7 @@ import (
 	"habical/backend/libs/authjwt"
 	"habical/backend/libs/httpx"
 	"habical/backend/libs/idgen"
+	"habical/backend/libs/logger"
 	"habical/backend/libs/password"
 	"habical/backend/services/auth/internal/config"
 
@@ -28,14 +30,17 @@ import (
 type Server struct {
 	cfg  config.Config
 	pool *pgxpool.Pool
+	log  *slog.Logger
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool) *Server {
-	return &Server{cfg: cfg, pool: pool}
+func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, pool: pool, log: log}
 }
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(logger.RequestID)
+	r.Use(logger.HTTPLogger(s.log))
 
 	r.Post("/auth/register", s.handleRegister)
 	r.Post("/auth/login", s.handleLogin)

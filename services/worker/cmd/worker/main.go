@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"habical/backend/libs/logger"
 	"habical/backend/services/worker/internal/app"
 	"habical/backend/services/worker/internal/config"
 	"habical/backend/services/worker/internal/repository"
@@ -15,9 +15,11 @@ import (
 )
 
 func main() {
+	log := logger.New("worker")
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("failed to load config: ", err)
+		log.Error("config_load_failed", "error", err.Error())
+		panic(err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -25,16 +27,18 @@ func main() {
 
 	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
-		log.Fatal("failed to connect to postgres: ", err)
+		log.Error("postgres_connect_failed", "error", err.Error())
+		panic(err)
 	}
 	defer pool.Close()
 
 	repo := repository.New(pool)
-	application := app.New(repo, cfg)
+	application := app.New(repo, cfg, log)
 
-	log.Println("worker started")
+	log.Info("worker_started")
 	if err := application.Run(ctx); err != nil {
-		log.Fatal("worker failed: ", err)
+		log.Error("worker_failed", "error", err.Error())
+		panic(err)
 	}
-	log.Println("worker stopped")
+	log.Info("worker_stopped")
 }

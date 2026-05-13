@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"habical/backend/libs/authjwt"
 	"habical/backend/libs/httpx"
+	"habical/backend/libs/logger"
 	"habical/backend/services/gateway/internal/config"
 
 	"github.com/go-chi/chi/v5"
@@ -21,20 +23,24 @@ import (
 type Server struct {
 	cfg        config.Config
 	httpClient *http.Client
+	log        *slog.Logger
 }
 
-func New(cfg config.Config) *Server {
+func New(cfg config.Config, log *slog.Logger) *Server {
 	return &Server{
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.HTTPClientTimeoutSeconds) * time.Second,
 		},
+		log: log,
 	}
 }
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
+	r.Use(logger.RequestID)
+	r.Use(logger.HTTPLogger(s.log))
 
 	// Auth public routes.
 	r.MethodFunc(http.MethodGet, "/avatars/*", s.forwardTo(s.cfg.AuthURL))

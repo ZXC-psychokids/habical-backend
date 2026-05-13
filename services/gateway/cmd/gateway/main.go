@@ -1,19 +1,21 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
+	"habical/backend/libs/logger"
 	"habical/backend/services/gateway/internal/config"
 	"habical/backend/services/gateway/internal/server"
 )
 
 func main() {
 	cfg := config.Load()
-	srv := server.New(cfg)
+	log := logger.New("gateway")
+	srv := server.New(cfg, log)
 	addr := ":" + cfg.Port
-	log.Printf("gateway service listening on %s", addr)
+	log.Info("service_started", "addr", addr)
 	if err := http.ListenAndServe(addr, srv.Router()); err != nil {
-		log.Fatalf("gateway: listen failed: %v", err)
+		log.Error("service_listen_failed", "error", err.Error())
+		panic(err)
 	}
 }

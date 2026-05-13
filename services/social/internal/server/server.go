@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"habical/backend/libs/authjwt"
 	"habical/backend/libs/httpx"
 	"habical/backend/libs/idgen"
+	"habical/backend/libs/logger"
 	"habical/backend/services/social/internal/config"
 
 	"github.com/go-chi/chi/v5"
@@ -23,14 +25,17 @@ import (
 type Server struct {
 	cfg  config.Config
 	pool *pgxpool.Pool
+	log  *slog.Logger
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool) *Server {
-	return &Server{cfg: cfg, pool: pool}
+func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, pool: pool, log: log}
 }
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(logger.RequestID)
+	r.Use(logger.HTTPLogger(s.log))
 	r.Use(s.authMiddleware)
 
 	r.Get("/me/friends", s.handleListFriends)

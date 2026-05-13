@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"time"
 
+	"habical/backend/libs/logger"
 	"habical/backend/libs/pgxutil"
 	"habical/backend/services/core/internal/config"
 	"habical/backend/services/core/internal/server"
@@ -13,19 +13,22 @@ import (
 
 func main() {
 	cfg := config.Load()
+	log := logger.New("core")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	pool, err := pgxutil.Connect(ctx, cfg.PostgresDSN)
 	if err != nil {
-		log.Fatalf("core: postgres connect failed: %v", err)
+		log.Error("postgres_connect_failed", "error", err.Error())
+		panic(err)
 	}
 	defer pool.Close()
 
-	srv := server.New(cfg, pool)
+	srv := server.New(cfg, pool, log)
 	addr := ":" + cfg.Port
-	log.Printf("core service listening on %s", addr)
+	log.Info("service_started", "addr", addr)
 	if err := http.ListenAndServe(addr, srv.Router()); err != nil {
-		log.Fatalf("core: listen failed: %v", err)
+		log.Error("service_listen_failed", "error", err.Error())
+		panic(err)
 	}
 }

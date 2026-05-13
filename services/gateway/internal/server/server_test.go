@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"habical/backend/libs/authjwt"
+	"habical/backend/libs/logger"
 	"habical/backend/services/gateway/internal/config"
 )
 
@@ -61,7 +62,7 @@ func TestHandleFriendPageTasks(t *testing.T) {
 		SocialURL:                socialServer.URL,
 		HTTPClientTimeoutSeconds: 5,
 	}
-	server := New(cfg)
+	server := New(cfg, logger.New("gateway-test"))
 
 	token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
 	if err != nil {
@@ -123,7 +124,7 @@ func TestHandleFriendPageSharedHabits(t *testing.T) {
 		SocialURL:                socialServer.URL,
 		HTTPClientTimeoutSeconds: 5,
 	}
-	server := New(cfg)
+	server := New(cfg, logger.New("gateway-test"))
 
 	token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
 	if err != nil {
@@ -213,7 +214,7 @@ func TestGatewayForwardsCoreRoutes(t *testing.T) {
 		SocialURL:                "http://social.invalid",
 		HTTPClientTimeoutSeconds: 5,
 	}
-	server := New(cfg)
+	server := New(cfg, logger.New("gateway-test"))
 
 	token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
 	if err != nil {
