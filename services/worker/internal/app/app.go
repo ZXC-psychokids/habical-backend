@@ -59,6 +59,7 @@ func (a *App) processDueJobs(ctx context.Context) error {
 	}
 
 	for _, job := range jobs {
+		a.log.Info("job_started", "job_id", job.ID, "job_type", job.Type)
 		if err := a.processJob(ctx, job); err != nil {
 			if err2 := a.repo.MarkJobFailed(ctx, job.ID, job.Attempts, a.cfg.RetryDelay, a.cfg.MaxAttempts); err2 != nil {
 				a.log.Error("worker_mark_job_failed_failed", "job_id", job.ID, "job_type", job.Type, "error", err2.Error())
@@ -68,7 +69,9 @@ func (a *App) processDueJobs(ctx context.Context) error {
 		}
 		if err := a.repo.MarkJobCompleted(ctx, job.ID); err != nil {
 			a.log.Error("worker_mark_job_completed_failed", "job_id", job.ID, "job_type", job.Type, "error", err.Error())
+			continue
 		}
+		a.log.Info("job_completed", "job_id", job.ID, "job_type", job.Type)
 	}
 	return nil
 }

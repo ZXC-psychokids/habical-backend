@@ -83,12 +83,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := httpx.BearerToken(r)
 		if !ok {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+			s.writeError(w, r, http.StatusUnauthorized, "Р СњР ВµР В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р С•Р Р†Р В°Р Р…")
 			return
 		}
 		userID, err := authjwt.ParseAccessToken(token, s.cfg.JWTSecret)
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+			s.writeError(w, r, http.StatusUnauthorized, "Р СњР ВµР В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р С•Р Р†Р В°Р Р…")
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, userID)
@@ -99,6 +99,25 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 func userIDFromContext(ctx context.Context) string {
 	raw, _ := ctx.Value(userIDKey).(string)
 	return raw
+}
+
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, message string, attrs ...any) {
+	logAttrs := []any{
+		"request_id", logger.RequestIDFromContext(r.Context()),
+		"user_id", userIDFromContext(r.Context()),
+		"path", r.URL.Path,
+		"status", status,
+		"error", message,
+	}
+	logAttrs = append(logAttrs, attrs...)
+
+	if status >= http.StatusInternalServerError {
+		s.log.Error("handler_failed", logAttrs...)
+	} else {
+		s.log.Warn("handler_warning", logAttrs...)
+	}
+
+	httpx.WriteError(w, status, message)
 }
 
 type user struct {
@@ -148,54 +167,54 @@ type registerRequest struct {
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	req.Handle = strings.TrimSpace(req.Handle)
 	if req.Email == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустая почта")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°")
 		return
 	}
 	if _, err := mail.ParseAddress(req.Email); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректная почта")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…Р В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°")
 		return
 	}
 	if req.Handle == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой хендл")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– РЎвЂ¦Р ВµР Р…Р Т‘Р В»")
 		return
 	}
 	if req.Password == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой пароль")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– Р С—Р В°РЎР‚Р С•Р В»РЎРЉ")
 		return
 	}
 	if req.Password != req.PasswordConfirmation {
-		httpx.WriteError(w, http.StatusBadRequest, "Пароль и подтверждение не совпадают")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџР В°РЎР‚Р С•Р В»РЎРЉ Р С‘ Р С—Р С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р В¶Р Т‘Р ВµР Р…Р С‘Р Вµ Р Р…Р Вµ РЎРѓР С•Р Р†Р С—Р В°Р Т‘Р В°РЎР‹РЎвЂљ")
 		return
 	}
 
 	exists, err := s.existsByEmail(r.Context(), req.Email)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if exists {
-		httpx.WriteError(w, http.StatusConflict, "Почта уже занята")
+		s.writeError(w, r, http.StatusConflict, "Р СџР С•РЎвЂЎРЎвЂљР В° РЎС“Р В¶Р Вµ Р В·Р В°Р Р…РЎРЏРЎвЂљР В°")
 		return
 	}
 	exists, err = s.existsByHandle(r.Context(), req.Handle)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if exists {
-		httpx.WriteError(w, http.StatusConflict, "Хендл уже занят")
+		s.writeError(w, r, http.StatusConflict, "Р ТђР ВµР Р…Р Т‘Р В» РЎС“Р В¶Р Вµ Р В·Р В°Р Р…РЎРЏРЎвЂљ")
 		return
 	}
 
 	passHash, err := password.Hash(req.Password)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	newUser := user{
@@ -218,7 +237,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -228,7 +247,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`, newUser.ID, newUser.Email, newUser.Handle, passHash, newUser.AvatarURL, newUser.CreatedAt)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
@@ -243,21 +262,29 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		defaultSettings.ShareHabits, defaultSettings.ShareCalendar, defaultSettings.ShareNews,
 		defaultSettings.NotifyFriendRequests, defaultSettings.NotifyHabitReminders, defaultSettings.NotifyFriendsNews)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	tokens, err := s.issueAndStoreSessionTokens(r.Context(), tx, newUser.ID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
+	s.log.Info(
+		"auth_register_succeeded",
+		"request_id", logger.RequestIDFromContext(r.Context()),
+		"user_id", newUser.ID,
+		"path", r.URL.Path,
+		"email", newUser.Email,
+		"handle", newUser.Handle,
+	)
 	httpx.WriteJSON(w, http.StatusCreated, authSuccessResponse{
 		User:     newUser,
 		Settings: defaultSettings,
@@ -273,16 +300,16 @@ type loginRequest struct {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	req.Login = strings.TrimSpace(req.Login)
 	if req.Login == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой login")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– login")
 		return
 	}
 	if req.Password == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой password")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– password")
 		return
 	}
 
@@ -295,39 +322,46 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неверная почта, хендл или пароль")
+			s.writeError(w, r, http.StatusUnauthorized, "Р СњР ВµР Р†Р ВµРЎР‚Р Р…Р В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°, РЎвЂ¦Р ВµР Р…Р Т‘Р В» Р С‘Р В»Р С‘ Р С—Р В°РЎР‚Р С•Р В»РЎРЉ")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if !password.Check(u.PasswordHash, req.Password) {
-		httpx.WriteError(w, http.StatusUnauthorized, "Неверная почта, хендл или пароль")
+		s.writeError(w, r, http.StatusUnauthorized, "Р СњР ВµР Р†Р ВµРЎР‚Р Р…Р В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°, РЎвЂ¦Р ВµР Р…Р Т‘Р В» Р С‘Р В»Р С‘ Р С—Р В°РЎР‚Р С•Р В»РЎРЉ")
 		return
 	}
 
 	settings, err := s.getUserSettings(r.Context(), u.ID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	defer tx.Rollback(r.Context())
 	tokens, err := s.issueAndStoreSessionTokens(r.Context(), tx, u.ID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	u.PasswordHash = ""
+	s.log.Info(
+		"auth_login_succeeded",
+		"request_id", logger.RequestIDFromContext(r.Context()),
+		"user_id", u.ID,
+		"path", r.URL.Path,
+		"handle", u.Handle,
+	)
 
 	httpx.WriteJSON(w, http.StatusOK, authSuccessResponse{
 		User:     u,
@@ -343,18 +377,18 @@ type refreshRequest struct {
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	if strings.TrimSpace(req.RefreshToken) == "" {
-		httpx.WriteError(w, http.StatusUnauthorized, "Refresh token недействителен")
+		s.writeError(w, r, http.StatusUnauthorized, "Refresh token Р Р…Р ВµР Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎвЂљР ВµР В»Р ВµР Р…")
 		return
 	}
 	hash := authjwt.HashOpaqueToken(req.RefreshToken)
 
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -370,15 +404,15 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	`, hash).Scan(&tokenID, &userID, &expiresAt, &revokedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusUnauthorized, "Refresh token недействителен")
+			s.writeError(w, r, http.StatusUnauthorized, "Refresh token Р Р…Р ВµР Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎвЂљР ВµР В»Р ВµР Р…")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	now := time.Now().UTC()
 	if revokedAt != nil || !expiresAt.After(now) {
-		httpx.WriteError(w, http.StatusUnauthorized, "Refresh token недействителен")
+		s.writeError(w, r, http.StatusUnauthorized, "Refresh token Р Р…Р ВµР Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎвЂљР ВµР В»Р ВµР Р…")
 		return
 	}
 
@@ -387,17 +421,17 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		SET revoked_at = $2
 		WHERE id = $1
 	`, tokenID, now); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	tokens, err := s.issueAndStoreSessionTokens(r.Context(), tx, userID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
@@ -407,11 +441,11 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	if strings.TrimSpace(req.RefreshToken) == "" {
-		httpx.WriteError(w, http.StatusUnauthorized, "Refresh token недействителен")
+		s.writeError(w, r, http.StatusUnauthorized, "Refresh token Р Р…Р ВµР Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎвЂљР ВµР В»Р ВµР Р…")
 		return
 	}
 	hash := authjwt.HashOpaqueToken(req.RefreshToken)
@@ -421,11 +455,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		WHERE token_hash = $1 AND revoked_at IS NULL
 	`, hash, time.Now().UTC())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		httpx.WriteError(w, http.StatusUnauthorized, "Refresh token недействителен")
+		s.writeError(w, r, http.StatusUnauthorized, "Refresh token Р Р…Р ВµР Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎвЂљР ВµР В»Р ВµР Р…")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -438,32 +472,32 @@ type passwordResetRequest struct {
 func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Request) {
 	var req passwordResetRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	if req.Email == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустая почта")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°")
 		return
 	}
 	if _, err := mail.ParseAddress(req.Email); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректная почта")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…Р В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°")
 		return
 	}
 
 	var userID string
 	if err := s.pool.QueryRow(r.Context(), `SELECT id FROM users WHERE email = $1`, req.Email).Scan(&userID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Пользователь не найден")
+			s.writeError(w, r, http.StatusNotFound, "Р СџР С•Р В»РЎРЉР В·Р С•Р Р†Р В°РЎвЂљР ВµР В»РЎРЉ Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	rawToken, err := authjwt.NewOpaqueToken()
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	hash := authjwt.HashOpaqueToken(rawToken)
@@ -472,12 +506,12 @@ func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Reque
 		VALUES ($1,$2,$3,$4,NULL,$5)
 	`, idgen.New(), userID, hash, time.Now().UTC().Add(s.cfg.PasswordResetTTL), time.Now().UTC())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{
-		"message": "Инструкции отправлены на почту",
+		"message": "Р ВР Р…РЎРѓРЎвЂљРЎР‚РЎС“Р С”РЎвЂ Р С‘Р С‘ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р…РЎвЂ№ Р Р…Р В° Р С—Р С•РЎвЂЎРЎвЂљРЎС“",
 	})
 }
 
@@ -490,27 +524,27 @@ type passwordResetConfirmRequest struct {
 func (s *Server) handlePasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
 	var req passwordResetConfirmRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	req.Token = strings.TrimSpace(req.Token)
 	if req.Token == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой токен")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– РЎвЂљР С•Р С”Р ВµР Р…")
 		return
 	}
 	if req.NewPassword == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой пароль")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– Р С—Р В°РЎР‚Р С•Р В»РЎРЉ")
 		return
 	}
 	if req.NewPassword != req.NewPasswordConfirmation {
-		httpx.WriteError(w, http.StatusBadRequest, "Пароли не совпадают")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџР В°РЎР‚Р С•Р В»Р С‘ Р Р…Р Вµ РЎРѓР С•Р Р†Р С—Р В°Р Т‘Р В°РЎР‹РЎвЂљ")
 		return
 	}
 
 	hash := authjwt.HashOpaqueToken(req.Token)
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -526,52 +560,52 @@ func (s *Server) handlePasswordResetConfirm(w http.ResponseWriter, r *http.Reque
 	`, hash).Scan(&tokenID, &userID, &expiresAt, &usedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusUnauthorized, "Токен недействителен")
+			s.writeError(w, r, http.StatusUnauthorized, "Р СћР С•Р С”Р ВµР Р… Р Р…Р ВµР Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎвЂљР ВµР В»Р ВµР Р…")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if usedAt != nil {
-		httpx.WriteError(w, http.StatusConflict, "Токен уже использован")
+		s.writeError(w, r, http.StatusConflict, "Р СћР С•Р С”Р ВµР Р… РЎС“Р В¶Р Вµ Р С‘РЎРѓР С—Р С•Р В»РЎРЉР В·Р С•Р Р†Р В°Р Р…")
 		return
 	}
 	if !expiresAt.After(time.Now().UTC()) {
-		httpx.WriteError(w, http.StatusUnauthorized, "Токен истёк")
+		s.writeError(w, r, http.StatusUnauthorized, "Р СћР С•Р С”Р ВµР Р… Р С‘РЎРѓРЎвЂљРЎвЂР С”")
 		return
 	}
 
 	passHash, err := password.Hash(req.NewPassword)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
 		UPDATE users SET password_hash = $2 WHERE id = $1
 	`, userID, passHash); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
 		UPDATE password_reset_tokens SET used_at = $2 WHERE id = $1
 	`, tokenID, time.Now().UTC()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{
-		"message": "Пароль успешно изменён",
+		"message": "Р СџР В°РЎР‚Р С•Р В»РЎРЉ РЎС“РЎРѓР С—Р ВµРЎв‚¬Р Р…Р С• Р С‘Р В·Р СР ВµР Р…РЎвЂР Р…",
 	})
 }
 
 func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	u, err := s.findUserByID(r.Context(), userIDFromContext(r.Context()))
 	if err != nil {
-		httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+		s.writeError(w, r, http.StatusUnauthorized, "Р СњР ВµР В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р С•Р Р†Р В°Р Р…")
 		return
 	}
 	u.PasswordHash = ""
@@ -586,11 +620,11 @@ type patchProfileRequest struct {
 func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	var req patchProfileRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	if req.Email == nil && req.Handle == nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Отсутствуют поля для обновления")
+		s.writeError(w, r, http.StatusBadRequest, "Р С›РЎвЂљРЎРѓРЎС“РЎвЂљРЎРѓРЎвЂљР Р†РЎС“РЎР‹РЎвЂљ Р С—Р С•Р В»РЎРЏ Р Т‘Р В»РЎРЏ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ")
 		return
 	}
 	currentUserID := userIDFromContext(r.Context())
@@ -598,16 +632,16 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	if req.Email != nil {
 		email := strings.TrimSpace(strings.ToLower(*req.Email))
 		if _, err := mail.ParseAddress(email); err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректная почта")
+			s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…Р В°РЎРЏ Р С—Р С•РЎвЂЎРЎвЂљР В°")
 			return
 		}
 		exists, err := s.existsByEmailExcludingUser(r.Context(), email, currentUserID)
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 		if exists {
-			httpx.WriteError(w, http.StatusConflict, "Почта уже занята")
+			s.writeError(w, r, http.StatusConflict, "Р СџР С•РЎвЂЎРЎвЂљР В° РЎС“Р В¶Р Вµ Р В·Р В°Р Р…РЎРЏРЎвЂљР В°")
 			return
 		}
 		req.Email = &email
@@ -615,16 +649,16 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	if req.Handle != nil {
 		handle := strings.TrimSpace(*req.Handle)
 		if handle == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "Пустой хендл")
+			s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– РЎвЂ¦Р ВµР Р…Р Т‘Р В»")
 			return
 		}
 		exists, err := s.existsByHandleExcludingUser(r.Context(), handle, currentUserID)
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 		if exists {
-			httpx.WriteError(w, http.StatusConflict, "Хендл уже занят")
+			s.writeError(w, r, http.StatusConflict, "Р ТђР ВµР Р…Р Т‘Р В» РЎС“Р В¶Р Вµ Р В·Р В°Р Р…РЎРЏРЎвЂљ")
 			return
 		}
 		req.Handle = &handle
@@ -646,13 +680,13 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	args = append(args, currentUserID)
 	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d", strings.Join(setParts, ", "), idx)
 	if _, err := s.pool.Exec(r.Context(), query, args...); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	updated, err := s.findUserByID(r.Context(), currentUserID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	updated.PasswordHash = ""
@@ -661,39 +695,39 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePatchAvatar(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(5 << 20); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Файл не передан")
+		s.writeError(w, r, http.StatusBadRequest, "Р В¤Р В°Р в„–Р В» Р Р…Р Вµ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р…")
 		return
 	}
 	file, fileHeader, err := r.FormFile("file")
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Файл не передан")
+		s.writeError(w, r, http.StatusBadRequest, "Р В¤Р В°Р в„–Р В» Р Р…Р Вµ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р…")
 		return
 	}
 	defer file.Close()
 
 	contentType := fileHeader.Header.Get("Content-Type")
 	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
-		httpx.WriteError(w, http.StatusBadRequest, "Неподдерживаемый тип файла")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С‘Р Р†Р В°Р ВµР СРЎвЂ№Р в„– РЎвЂљР С‘Р С— РЎвЂћР В°Р в„–Р В»Р В°")
 		return
 	}
 
 	userID := userIDFromContext(r.Context())
 	url, err := s.saveAvatarFile(file, fileHeader, userID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Не удалось сохранить аватар")
+		s.writeError(w, r, http.StatusInternalServerError, "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†Р В°РЎвЂљР В°РЎР‚")
 		return
 	}
 
 	if _, err := s.pool.Exec(r.Context(), `
 		UPDATE users SET avatar_url = $2 WHERE id = $1
 	`, userID, url); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 
 	updated, err := s.findUserByID(r.Context(), userID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	updated.PasswordHash = ""
@@ -724,7 +758,7 @@ func (s *Server) saveAvatarFile(file multipart.File, header *multipart.FileHeade
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.getUserSettings(r.Context(), userIDFromContext(r.Context()))
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, settings)
@@ -739,36 +773,36 @@ type patchPrivacySettingsRequest struct {
 func (s *Server) handlePatchPrivacySettings(w http.ResponseWriter, r *http.Request) {
 	var req patchPrivacySettingsRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	if req.ShareHabits == nil && req.ShareCalendar == nil && req.ShareNews == nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Отсутствуют все поля для обновления")
+		s.writeError(w, r, http.StatusBadRequest, "Р С›РЎвЂљРЎРѓРЎС“РЎвЂљРЎРѓРЎвЂљР Р†РЎС“РЎР‹РЎвЂљ Р Р†РЎРѓР Вµ Р С—Р С•Р В»РЎРЏ Р Т‘Р В»РЎРЏ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ")
 		return
 	}
 	userID := userIDFromContext(r.Context())
 	if req.ShareHabits != nil {
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET share_habits = $2 WHERE user_id = $1`, userID, *req.ShareHabits); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 	if req.ShareCalendar != nil {
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET share_calendar = $2 WHERE user_id = $1`, userID, *req.ShareCalendar); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 	if req.ShareNews != nil {
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET share_news = $2 WHERE user_id = $1`, userID, *req.ShareNews); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 
 	settings, err := s.getUserSettings(r.Context(), userID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -787,36 +821,36 @@ type patchNotificationSettingsRequest struct {
 func (s *Server) handlePatchNotificationSettings(w http.ResponseWriter, r *http.Request) {
 	var req patchNotificationSettingsRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	if req.NotifyFriendRequests == nil && req.NotifyHabitReminders == nil && req.NotifyFriendsNews == nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Отсутствуют все поля для обновления")
+		s.writeError(w, r, http.StatusBadRequest, "Р С›РЎвЂљРЎРѓРЎС“РЎвЂљРЎРѓРЎвЂљР Р†РЎС“РЎР‹РЎвЂљ Р Р†РЎРѓР Вµ Р С—Р С•Р В»РЎРЏ Р Т‘Р В»РЎРЏ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ")
 		return
 	}
 	userID := userIDFromContext(r.Context())
 	if req.NotifyFriendRequests != nil {
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET notify_friend_requests = $2 WHERE user_id = $1`, userID, *req.NotifyFriendRequests); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 	if req.NotifyHabitReminders != nil {
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET notify_habit_reminders = $2 WHERE user_id = $1`, userID, *req.NotifyHabitReminders); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 	if req.NotifyFriendsNews != nil {
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET notify_friends_news = $2 WHERE user_id = $1`, userID, *req.NotifyFriendsNews); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 
 	settings, err := s.getUserSettings(r.Context(), userID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -834,11 +868,11 @@ type patchCalendarSettingsRequest struct {
 func (s *Server) handlePatchCalendarSettings(w http.ResponseWriter, r *http.Request) {
 	var req patchCalendarSettingsRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– JSON")
 		return
 	}
 	if req.Timezone == nil && req.WeekStartsOn == nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Отсутствуют все поля для обновления")
+		s.writeError(w, r, http.StatusBadRequest, "Р С›РЎвЂљРЎРѓРЎС“РЎвЂљРЎРѓРЎвЂљР Р†РЎС“РЎР‹РЎвЂљ Р Р†РЎРѓР Вµ Р С—Р С•Р В»РЎРЏ Р Т‘Р В»РЎРЏ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ")
 		return
 	}
 	userID := userIDFromContext(r.Context())
@@ -846,32 +880,32 @@ func (s *Server) handlePatchCalendarSettings(w http.ResponseWriter, r *http.Requ
 	if req.Timezone != nil {
 		tz := strings.TrimSpace(*req.Timezone)
 		if tz == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный timezone")
+			s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– timezone")
 			return
 		}
 		if _, err := time.LoadLocation(tz); err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный timezone")
+			s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– timezone")
 			return
 		}
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET timezone = $2 WHERE user_id = $1`, userID, tz); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 	if req.WeekStartsOn != nil {
 		if *req.WeekStartsOn != 1 && *req.WeekStartsOn != 7 {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный weekStartsOn")
+			s.writeError(w, r, http.StatusBadRequest, "Р СњР ВµР С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…РЎвЂ№Р в„– weekStartsOn")
 			return
 		}
 		if _, err := s.pool.Exec(r.Context(), `UPDATE user_settings SET week_starts_on = $2 WHERE user_id = $1`, userID, *req.WeekStartsOn); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 			return
 		}
 	}
 
 	settings, err := s.getUserSettings(r.Context(), userID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -890,10 +924,10 @@ func (s *Server) handleInternalGetPublicUser(w http.ResponseWriter, r *http.Requ
 	`, userID).Scan(&response.ID, &response.Handle, &response.AvatarURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Пользователь не найден")
+			s.writeError(w, r, http.StatusNotFound, "Р СџР С•Р В»РЎРЉР В·Р С•Р Р†Р В°РЎвЂљР ВµР В»РЎРЉ Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, response)
@@ -904,10 +938,10 @@ func (s *Server) handleInternalGetUserSettings(w http.ResponseWriter, r *http.Re
 	settings, err := s.getUserSettings(r.Context(), userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Пользователь не найден")
+			s.writeError(w, r, http.StatusNotFound, "Р СџР С•Р В»РЎРЉР В·Р С•Р Р†Р В°РЎвЂљР ВµР В»РЎРЉ Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, settings)
@@ -916,7 +950,7 @@ func (s *Server) handleInternalGetUserSettings(w http.ResponseWriter, r *http.Re
 func (s *Server) handleInternalGetByHandle(w http.ResponseWriter, r *http.Request) {
 	handle := strings.TrimSpace(chi.URLParam(r, "handle"))
 	if handle == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой handle")
+		s.writeError(w, r, http.StatusBadRequest, "Р СџРЎС“РЎРѓРЎвЂљР С•Р в„– handle")
 		return
 	}
 	var response publicUser
@@ -927,10 +961,10 @@ func (s *Server) handleInternalGetByHandle(w http.ResponseWriter, r *http.Reques
 	`, handle).Scan(&response.ID, &response.Handle, &response.AvatarURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Пользователь не найден")
+			s.writeError(w, r, http.StatusNotFound, "Р СџР С•Р В»РЎРЉР В·Р С•Р Р†Р В°РЎвЂљР ВµР В»РЎРЉ Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р вЂ™Р Р…РЎС“РЎвЂљРЎР‚Р ВµР Р…Р Р…РЎРЏРЎРЏ Р С•РЎв‚¬Р С‘Р В±Р С”Р В°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, response)

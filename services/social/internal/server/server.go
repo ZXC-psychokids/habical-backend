@@ -60,12 +60,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := httpx.BearerToken(r)
 		if !ok {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+			s.writeError(w, r, http.StatusUnauthorized, "РќРµР°РІС‚РѕСЂРёР·РѕРІР°РЅ")
 			return
 		}
 		userID, err := authjwt.ParseAccessToken(token, s.cfg.JWTSecret)
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+			s.writeError(w, r, http.StatusUnauthorized, "РќРµР°РІС‚РѕСЂРёР·РѕРІР°РЅ")
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, userID)
@@ -76,6 +76,25 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 func userIDFromContext(ctx context.Context) string {
 	raw, _ := ctx.Value(userIDKey).(string)
 	return raw
+}
+
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, message string, attrs ...any) {
+	logAttrs := []any{
+		"request_id", logger.RequestIDFromContext(r.Context()),
+		"user_id", userIDFromContext(r.Context()),
+		"path", r.URL.Path,
+		"status", status,
+		"error", message,
+	}
+	logAttrs = append(logAttrs, attrs...)
+
+	if status >= http.StatusInternalServerError {
+		s.log.Error("handler_failed", logAttrs...)
+	} else {
+		s.log.Warn("handler_warning", logAttrs...)
+	}
+
+	httpx.WriteError(w, status, message)
 }
 
 type publicUser struct {
@@ -97,7 +116,7 @@ func (s *Server) handleListFriends(w http.ResponseWriter, r *http.Request) {
 		WHERE user1_id = $1 OR user2_id = $1
 	`, currentUserID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer rows.Close()
@@ -108,7 +127,7 @@ func (s *Server) handleListFriends(w http.ResponseWriter, r *http.Request) {
 		var u1 string
 		var u2 string
 		if err := rows.Scan(&friendshipID, &u1, &u2); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		friendID := u1
@@ -119,7 +138,7 @@ func (s *Server) handleListFriends(w http.ResponseWriter, r *http.Request) {
 		if err := s.pool.QueryRow(r.Context(), `
 			SELECT id, handle, avatar_url FROM users WHERE id = $1
 		`, friendID).Scan(&friend.ID, &friend.Handle, &friend.AvatarURL); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		var sharedCount int
@@ -131,7 +150,7 @@ func (s *Server) handleListFriends(w http.ResponseWriter, r *http.Request) {
 			WHERE (h1.user_id = $1 AND h2.user_id = $2)
 			   OR (h1.user_id = $2 AND h2.user_id = $1)
 		`, currentUserID, friendID).Scan(&sharedCount); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 
@@ -155,7 +174,7 @@ func (s *Server) handleDeleteFriend(w http.ResponseWriter, r *http.Request) {
 	currentUserID := userIDFromContext(r.Context())
 	friendUserID := chi.URLParam(r, "friendUserId")
 	if strings.TrimSpace(friendUserID) == "" {
-		httpx.WriteError(w, http.StatusNotFound, "Дружба не найдена")
+		s.writeError(w, r, http.StatusNotFound, "Р”СЂСѓР¶Р±Р° РЅРµ РЅР°Р№РґРµРЅР°")
 		return
 	}
 	tag, err := s.pool.Exec(r.Context(), `
@@ -163,11 +182,11 @@ func (s *Server) handleDeleteFriend(w http.ResponseWriter, r *http.Request) {
 		WHERE (user1_id = $1 AND user2_id = $2) OR (user1_id = $2 AND user2_id = $1)
 	`, currentUserID, friendUserID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		httpx.WriteError(w, http.StatusNotFound, "Дружба не найдена")
+		s.writeError(w, r, http.StatusNotFound, "Р”СЂСѓР¶Р±Р° РЅРµ РЅР°Р№РґРµРЅР°")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -190,7 +209,7 @@ func (s *Server) handleListInvites(w http.ResponseWriter, r *http.Request) {
 		ORDER BY fi.created_at DESC
 	`, currentUserID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer rows.Close()
@@ -201,7 +220,7 @@ func (s *Server) handleListInvites(w http.ResponseWriter, r *http.Request) {
 			&item.ID, &item.Status, &item.CreatedAt,
 			&item.Sender.ID, &item.Sender.Handle, &item.Sender.AvatarURL,
 		); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		result = append(result, item)
@@ -217,12 +236,12 @@ func (s *Server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	currentUserID := userIDFromContext(r.Context())
 	var req createInviteRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
 		return
 	}
 	handle := strings.TrimSpace(req.Handle)
 	if handle == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой handle")
+		s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ handle")
 		return
 	}
 
@@ -231,24 +250,24 @@ func (s *Server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		SELECT id FROM users WHERE handle = $1
 	`, handle).Scan(&targetUserID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Пользователь не найден")
+			s.writeError(w, r, http.StatusNotFound, "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if targetUserID == currentUserID {
-		httpx.WriteError(w, http.StatusConflict, "Нельзя отправить заявку самому себе")
+		s.writeError(w, r, http.StatusConflict, "РќРµР»СЊР·СЏ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°СЏРІРєСѓ СЃР°РјРѕРјСѓ СЃРµР±Рµ")
 		return
 	}
 
 	isFriend, err := s.isFriendshipExists(r.Context(), currentUserID, targetUserID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if isFriend {
-		httpx.WriteError(w, http.StatusConflict, "Пользователь уже друг")
+		s.writeError(w, r, http.StatusConflict, "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓР¶Рµ РґСЂСѓРі")
 		return
 	}
 
@@ -265,11 +284,11 @@ func (s *Server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 			  )
 		)
 	`, currentUserID, targetUserID).Scan(&pendingExists); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if pendingExists {
-		httpx.WriteError(w, http.StatusConflict, "Заявка уже существует")
+		s.writeError(w, r, http.StatusConflict, "Р—Р°СЏРІРєР° СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚")
 		return
 	}
 
@@ -278,7 +297,7 @@ func (s *Server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO friend_invites (id, sender_user_id, receiver_user_id, status, created_at)
 		VALUES ($1,$2,$3,'pending',$4)
 	`, inviteID, currentUserID, targetUserID, time.Now().UTC()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
@@ -294,7 +313,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -309,25 +328,25 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	`, inviteID).Scan(&senderID, &receiverID, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Заявка не найдена")
+			s.writeError(w, r, http.StatusNotFound, "Р—Р°СЏРІРєР° РЅРµ РЅР°Р№РґРµРЅР°")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if receiverID != currentUserID {
-		httpx.WriteError(w, http.StatusForbidden, "Заявка не адресована текущему пользователю")
+		s.writeError(w, r, http.StatusForbidden, "Р—Р°СЏРІРєР° РЅРµ Р°РґСЂРµСЃРѕРІР°РЅР° С‚РµРєСѓС‰РµРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ")
 		return
 	}
 	if status != "pending" {
-		httpx.WriteError(w, http.StatusConflict, "Заявка уже обработана")
+		s.writeError(w, r, http.StatusConflict, "Р—Р°СЏРІРєР° СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅР°")
 		return
 	}
 
 	if _, err := tx.Exec(r.Context(), `
 		UPDATE friend_invites SET status = 'accepted' WHERE id = $1
 	`, inviteID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
@@ -337,7 +356,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO friendships (id, user1_id, user2_id, created_at)
 		VALUES ($1,$2,$3,$4)
 	`, friendshipID, u1, u2, time.Now().UTC()); err != nil {
-		httpx.WriteError(w, http.StatusConflict, "Пользователь уже друг")
+		s.writeError(w, r, http.StatusConflict, "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓР¶Рµ РґСЂСѓРі")
 		return
 	}
 
@@ -347,7 +366,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	`, idgen.New(), senderID, receiverID, senderID, time.Now().UTC())
 
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
@@ -369,24 +388,24 @@ func (s *Server) handleRejectInvite(w http.ResponseWriter, r *http.Request) {
 	`, inviteID).Scan(&receiverID, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Заявка не найдена")
+			s.writeError(w, r, http.StatusNotFound, "Р—Р°СЏРІРєР° РЅРµ РЅР°Р№РґРµРЅР°")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if receiverID != currentUserID {
-		httpx.WriteError(w, http.StatusForbidden, "Заявка не адресована текущему пользователю")
+		s.writeError(w, r, http.StatusForbidden, "Р—Р°СЏРІРєР° РЅРµ Р°РґСЂРµСЃРѕРІР°РЅР° С‚РµРєСѓС‰РµРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ")
 		return
 	}
 	if status != "pending" {
-		httpx.WriteError(w, http.StatusConflict, "Заявка уже обработана")
+		s.writeError(w, r, http.StatusConflict, "Р—Р°СЏРІРєР° СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅР°")
 		return
 	}
 	if _, err := s.pool.Exec(r.Context(), `
 		UPDATE friend_invites SET status = 'rejected' WHERE id = $1
 	`, inviteID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -436,14 +455,14 @@ func (s *Server) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 || n > 100 {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный limit")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ limit")
 			return
 		}
 		limit = n
 	}
 	offset, err := decodeCursor(r.URL.Query().Get("cursor"))
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный cursor")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ cursor")
 		return
 	}
 
@@ -464,7 +483,7 @@ func (s *Server) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 		LIMIT $2 OFFSET $3
 	`, currentUserID, limit+1, offset)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer rows.Close()
@@ -484,7 +503,7 @@ func (s *Server) handleGetFeed(w http.ResponseWriter, r *http.Request) {
 			&relatedUserID, &relatedUserHandle, &relatedUserAvatar,
 			&relatedHabitID, &relatedHabitTitle, &relatedHabitColor,
 		); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		if relatedUserID != nil && relatedUserHandle != nil && relatedUserAvatar != nil {
@@ -525,7 +544,7 @@ func (s *Server) handleInternalFriendshipCheck(w http.ResponseWriter, r *http.Re
 	otherUserID := chi.URLParam(r, "otherUserId")
 	ok, err := s.isFriendshipExists(r.Context(), userID, otherUserID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"isFriend": ok})

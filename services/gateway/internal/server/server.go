@@ -181,8 +181,19 @@ func (s *Server) forwardTo(targetBaseURL string) http.HandlerFunc {
 }
 
 func (s *Server) forward(w http.ResponseWriter, r *http.Request, targetBaseURL string) {
+	requestID := logger.RequestIDFromContext(r.Context())
+	targetName := s.targetName(targetBaseURL)
+
 	target, err := joinURL(targetBaseURL, r.URL.Path, r.URL.RawQuery)
 	if err != nil {
+		s.log.Error(
+			"proxy_failed",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"target", targetName,
+			"error", err.Error(),
+		)
 		httpx.WriteError(w, http.StatusInternalServerError, "Неверная конфигурация gateway")
 		return
 	}
@@ -193,21 +204,82 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, targetBaseURL s
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(bodyBytes))
 	if err != nil {
+		s.log.Error(
+			"proxy_failed",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"target", targetName,
+			"error", err.Error(),
+		)
 		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
 		return
 	}
 	copyHeaders(req.Header, r.Header)
+	if req.Header.Get(logger.RequestIDHeader) == "" && requestID != "" {
+		req.Header.Set(logger.RequestIDHeader, requestID)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
+		s.log.Error(
+			"proxy_failed",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"target", targetName,
+			"error", err.Error(),
+		)
 		httpx.WriteError(w, http.StatusBadGateway, "Downstream сервис недоступен")
 		return
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
+		s.log.Warn(
+			"proxy_downstream_error",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"target", targetName,
+			"status", resp.StatusCode,
+		)
+	} else if resp.StatusCode >= http.StatusInternalServerError {
+		s.log.Error(
+			"proxy_downstream_error",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"target", targetName,
+			"status", resp.StatusCode,
+		)
+	} else {
+		s.log.Info(
+			"proxy_completed",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"target", targetName,
+			"status", resp.StatusCode,
+		)
+	}
+
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+func (s *Server) targetName(targetBaseURL string) string {
+	switch strings.TrimRight(targetBaseURL, "/") {
+	case strings.TrimRight(s.cfg.AuthURL, "/"):
+		return "auth"
+	case strings.TrimRight(s.cfg.CoreURL, "/"):
+		return "core"
+	case strings.TrimRight(s.cfg.SocialURL, "/"):
+		return "social"
+	default:
+		return "unknown"
+	}
 }
 
 func copyHeaders(dst http.Header, src http.Header) {

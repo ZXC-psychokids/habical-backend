@@ -71,12 +71,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := httpx.BearerToken(r)
 		if !ok {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+			s.writeError(w, r, http.StatusUnauthorized, "РќРµР°РІС‚РѕСЂРёР·РѕРІР°РЅ")
 			return
 		}
 		userID, err := authjwt.ParseAccessToken(token, s.cfg.JWTSecret)
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnauthorized, "Неавторизован")
+			s.writeError(w, r, http.StatusUnauthorized, "РќРµР°РІС‚РѕСЂРёР·РѕРІР°РЅ")
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, userID)
@@ -87,6 +87,25 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 func userIDFromContext(ctx context.Context) string {
 	raw, _ := ctx.Value(userIDKey).(string)
 	return raw
+}
+
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, message string, attrs ...any) {
+	logAttrs := []any{
+		"request_id", logger.RequestIDFromContext(r.Context()),
+		"user_id", userIDFromContext(r.Context()),
+		"path", r.URL.Path,
+		"status", status,
+		"error", message,
+	}
+	logAttrs = append(logAttrs, attrs...)
+
+	if status >= http.StatusInternalServerError {
+		s.log.Error("handler_failed", logAttrs...)
+	} else {
+		s.log.Warn("handler_warning", logAttrs...)
+	}
+
+	httpx.WriteError(w, status, message)
 }
 
 type eventCategory struct {
@@ -143,17 +162,17 @@ func parseDateQuery(r *http.Request, key string) (time.Time, error) {
 func (s *Server) handleGetMyEvents(w http.ResponseWriter, r *http.Request) {
 	from, err := parseDateTimeQuery(r, "from")
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Не передан from")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµ РїРµСЂРµРґР°РЅ from")
 		return
 	}
 	to, err := parseDateTimeQuery(r, "to")
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Не передан to")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµ РїРµСЂРµРґР°РЅ to")
 		return
 	}
 	events, err := s.listEvents(r.Context(), userIDFromContext(r.Context()), from, to)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, events)
@@ -173,38 +192,38 @@ type createEventRequest struct {
 func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	var req createEventRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
 		return
 	}
 	req.Title = strings.TrimSpace(req.Title)
 	if req.Title == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой title")
+		s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ title")
 		return
 	}
 	startsAt, err := time.Parse(time.RFC3339, req.StartsAt)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный формат дат")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ РґР°С‚")
 		return
 	}
 	endsAt, err := time.Parse(time.RFC3339, req.EndsAt)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный формат дат")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ РґР°С‚")
 		return
 	}
 	if !endsAt.After(startsAt) {
-		httpx.WriteError(w, http.StatusBadRequest, "endsAt <= startsAt")
+		s.writeError(w, r, http.StatusBadRequest, "endsAt <= startsAt")
 		return
 	}
 	if !slices.Contains(allowedEventSchedules, req.ScheduleType) {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный scheduleType")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ scheduleType")
 		return
 	}
 	if req.IntervalDays < 1 {
-		httpx.WriteError(w, http.StatusBadRequest, "intervalDays должен быть >= 1")
+		s.writeError(w, r, http.StatusBadRequest, "intervalDays РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ >= 1")
 		return
 	}
 	if err := validateWeekdaysRule(req.ScheduleType, req.Weekdays); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		s.writeError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	userID := userIDFromContext(r.Context())
@@ -216,10 +235,10 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $1 AND user_id = $2
 	`, req.CategoryID, userID).Scan(&category.ID, &category.Title, &category.Color); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "Категория не найдена")
+			s.writeError(w, r, http.StatusNotFound, "РљР°С‚РµРіРѕСЂРёСЏ РЅРµ РЅР°Р№РґРµРЅР°")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
@@ -231,19 +250,19 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 			SELECT id, title FROM tasks WHERE id = $1 AND user_id = $2
 		`, taskID, userID).Scan(&task.ID, &task.Title); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				httpx.WriteError(w, http.StatusNotFound, "Задача не найдена")
+				s.writeError(w, r, http.StatusNotFound, "Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°")
 				return
 			}
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		var linked bool
 		if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE task_id = $1)`, taskID).Scan(&linked); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		if linked {
-			httpx.WriteError(w, http.StatusConflict, "Задача уже связана с другим событием")
+			s.writeError(w, r, http.StatusConflict, "Р—Р°РґР°С‡Р° СѓР¶Рµ СЃРІСЏР·Р°РЅР° СЃ РґСЂСѓРіРёРј СЃРѕР±С‹С‚РёРµРј")
 			return
 		}
 	}
@@ -251,7 +270,7 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	eventID := idgen.New()
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -266,17 +285,17 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 	`, eventID, userID, category.ID, taskID, req.Title, startsAt.UTC(), endsAt.UTC(), req.ScheduleType, req.IntervalDays, time.Now().UTC()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	for _, wd := range req.Weekdays {
 		if _, err := tx.Exec(r.Context(), `INSERT INTO event_weekdays (event_id, weekday) VALUES ($1, $2)`, eventID, wd); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
@@ -298,20 +317,20 @@ func (s *Server) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	ownerID, exists, err := s.getEventOwner(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if !exists {
-		httpx.WriteError(w, http.StatusNotFound, "Событие не найдено")
+		s.writeError(w, r, http.StatusNotFound, "РЎРѕР±С‹С‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 		return
 	}
 	if ownerID != userID {
-		httpx.WriteError(w, http.StatusForbidden, "Событие не принадлежит текущему пользователю")
+		s.writeError(w, r, http.StatusForbidden, "РЎРѕР±С‹С‚РёРµ РЅРµ РїСЂРёРЅР°РґР»РµР¶РёС‚ С‚РµРєСѓС‰РµРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ")
 		return
 	}
 	event, err := s.getEventByID(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, event)
@@ -332,31 +351,31 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	ownerID, exists, err := s.getEventOwner(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if !exists {
-		httpx.WriteError(w, http.StatusNotFound, "Событие не найдено")
+		s.writeError(w, r, http.StatusNotFound, "РЎРѕР±С‹С‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 		return
 	}
 	if ownerID != userID {
-		httpx.WriteError(w, http.StatusForbidden, "Событие не принадлежит текущему пользователю")
+		s.writeError(w, r, http.StatusForbidden, "РЎРѕР±С‹С‚РёРµ РЅРµ РїСЂРёРЅР°РґР»РµР¶РёС‚ С‚РµРєСѓС‰РµРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ")
 		return
 	}
 
 	var req updateEventRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
 		return
 	}
 	if req.Title == nil && req.StartsAt == nil && req.EndsAt == nil && req.ScheduleType == nil && req.IntervalDays == nil && req.CategoryID == nil && req.Weekdays == nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Отсутствуют поля для обновления")
+		s.writeError(w, r, http.StatusBadRequest, "РћС‚СЃСѓС‚СЃС‚РІСѓСЋС‚ РїРѕР»СЏ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ")
 		return
 	}
 
 	current, err := s.getEventByID(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
@@ -364,7 +383,7 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
 		if title == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "Пустой title")
+			s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ title")
 			return
 		}
 		next.Title = title
@@ -372,7 +391,7 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 	if req.StartsAt != nil {
 		parsed, err := time.Parse(time.RFC3339, *req.StartsAt)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный формат дат")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ РґР°С‚")
 			return
 		}
 		next.StartsAt = parsed.UTC()
@@ -380,25 +399,25 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 	if req.EndsAt != nil {
 		parsed, err := time.Parse(time.RFC3339, *req.EndsAt)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный формат дат")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ РґР°С‚")
 			return
 		}
 		next.EndsAt = parsed.UTC()
 	}
 	if !next.EndsAt.After(next.StartsAt) {
-		httpx.WriteError(w, http.StatusBadRequest, "endsAt <= startsAt")
+		s.writeError(w, r, http.StatusBadRequest, "endsAt <= startsAt")
 		return
 	}
 	if req.ScheduleType != nil {
 		if !slices.Contains(allowedEventSchedules, *req.ScheduleType) {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный scheduleType")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ scheduleType")
 			return
 		}
 		next.ScheduleType = *req.ScheduleType
 	}
 	if req.IntervalDays != nil {
 		if *req.IntervalDays < 1 {
-			httpx.WriteError(w, http.StatusBadRequest, "intervalDays должен быть >= 1")
+			s.writeError(w, r, http.StatusBadRequest, "intervalDays РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ >= 1")
 			return
 		}
 		next.IntervalDays = *req.IntervalDays
@@ -407,13 +426,13 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 		next.Weekdays = req.Weekdays
 	}
 	if err := validateWeekdaysRule(next.ScheduleType, next.Weekdays); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		s.writeError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.CategoryID != nil {
 		categoryID := strings.TrimSpace(*req.CategoryID)
 		if categoryID == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "Пустой categoryId")
+			s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ categoryId")
 			return
 		}
 		var category eventCategory
@@ -421,10 +440,10 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 			SELECT id, title, color FROM event_categories WHERE id = $1 AND user_id = $2
 		`, categoryID, userID).Scan(&category.ID, &category.Title, &category.Color); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				httpx.WriteError(w, http.StatusNotFound, "Категория не найдена")
+				s.writeError(w, r, http.StatusNotFound, "РљР°С‚РµРіРѕСЂРёСЏ РЅРµ РЅР°Р№РґРµРЅР°")
 				return
 			}
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		next.Category = category
@@ -432,7 +451,7 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -442,27 +461,27 @@ func (s *Server) handlePatchEvent(w http.ResponseWriter, r *http.Request) {
 		SET title = $2, starts_at = $3, ends_at = $4, schedule_type = $5, interval_days = $6, category_id = $7
 		WHERE id = $1
 	`, eventID, next.Title, next.StartsAt, next.EndsAt, next.ScheduleType, next.IntervalDays, next.Category.ID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `DELETE FROM event_weekdays WHERE event_id = $1`, eventID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	for _, wd := range next.Weekdays {
 		if _, err := tx.Exec(r.Context(), `INSERT INTO event_weekdays (event_id, weekday) VALUES ($1, $2)`, eventID, wd); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
 	updated, err := s.getEventByID(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, updated)
@@ -473,19 +492,19 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	ownerID, exists, err := s.getEventOwner(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if !exists {
-		httpx.WriteError(w, http.StatusNotFound, "Событие не найдено")
+		s.writeError(w, r, http.StatusNotFound, "РЎРѕР±С‹С‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 		return
 	}
 	if ownerID != userID {
-		httpx.WriteError(w, http.StatusForbidden, "Событие не принадлежит текущему пользователю")
+		s.writeError(w, r, http.StatusForbidden, "РЎРѕР±С‹С‚РёРµ РЅРµ РїСЂРёРЅР°РґР»РµР¶РёС‚ С‚РµРєСѓС‰РµРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ")
 		return
 	}
 	if _, err := s.pool.Exec(r.Context(), `DELETE FROM events WHERE id = $1`, eventID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -501,48 +520,48 @@ func (s *Server) handleMoveEvent(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	ownerID, exists, err := s.getEventOwner(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if !exists {
-		httpx.WriteError(w, http.StatusNotFound, "Событие не найдено")
+		s.writeError(w, r, http.StatusNotFound, "РЎРѕР±С‹С‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 		return
 	}
 	if ownerID != userID {
-		httpx.WriteError(w, http.StatusForbidden, "Событие не принадлежит текущему пользователю")
+		s.writeError(w, r, http.StatusForbidden, "РЎРѕР±С‹С‚РёРµ РЅРµ РїСЂРёРЅР°РґР»РµР¶РёС‚ С‚РµРєСѓС‰РµРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ")
 		return
 	}
 
 	var req moveEventRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
 		return
 	}
 	startsAt, err := time.Parse(time.RFC3339, req.StartsAt)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный формат дат")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ РґР°С‚")
 		return
 	}
 	endsAt, err := time.Parse(time.RFC3339, req.EndsAt)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный формат дат")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ РґР°С‚")
 		return
 	}
 	if !endsAt.After(startsAt) {
-		httpx.WriteError(w, http.StatusBadRequest, "endsAt <= startsAt")
+		s.writeError(w, r, http.StatusBadRequest, "endsAt <= startsAt")
 		return
 	}
 
 	if _, err := s.pool.Exec(r.Context(), `
 		UPDATE events SET starts_at = $2, ends_at = $3 WHERE id = $1
 	`, eventID, startsAt.UTC(), endsAt.UTC()); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 
 	updated, err := s.getEventByID(r.Context(), eventID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, updated)
@@ -556,7 +575,7 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 		ORDER BY title ASC
 	`, userIDFromContext(r.Context()))
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	defer rows.Close()
@@ -565,7 +584,7 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item eventCategory
 		if err := rows.Scan(&item.ID, &item.Title, &item.Color); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		result = append(result, item)
@@ -581,17 +600,17 @@ type createCategoryRequest struct {
 func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 	var req createCategoryRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
 		return
 	}
 	req.Title = strings.TrimSpace(req.Title)
 	req.Color = strings.TrimSpace(req.Color)
 	if req.Title == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой title")
+		s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ title")
 		return
 	}
 	if req.Color == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "Пустой color")
+		s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ color")
 		return
 	}
 	item := eventCategory{
@@ -603,7 +622,7 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO event_categories (id, user_id, title, color)
 		VALUES ($1, $2, $3, $4)
 	`, item.ID, userIDFromContext(r.Context()), item.Title, item.Color); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, item)
@@ -622,47 +641,47 @@ func (s *Server) handlePatchCategory(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.QueryRow(r.Context(), `
 		SELECT EXISTS(SELECT 1 FROM event_categories WHERE id = $1 AND user_id = $2)
 	`, categoryID, userID).Scan(&exists); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if !exists {
-		httpx.WriteError(w, http.StatusNotFound, "Категория не найдена")
+		s.writeError(w, r, http.StatusNotFound, "РљР°С‚РµРіРѕСЂРёСЏ РЅРµ РЅР°Р№РґРµРЅР°")
 		return
 	}
 
 	var req patchCategoryRequest
 	if err := httpx.ReadJSON(r, &req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Некорректный JSON")
+		s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
 		return
 	}
 	if req.Title == nil && req.Color == nil {
-		httpx.WriteError(w, http.StatusBadRequest, "Отсутствуют поля для обновления")
+		s.writeError(w, r, http.StatusBadRequest, "РћС‚СЃСѓС‚СЃС‚РІСѓСЋС‚ РїРѕР»СЏ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ")
 		return
 	}
 
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
 		if title == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "Пустой title")
+			s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ title")
 			return
 		}
 		if _, err := s.pool.Exec(r.Context(), `
 			UPDATE event_categories SET title = $2 WHERE id = $1
 		`, categoryID, title); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 	}
 	if req.Color != nil {
 		color := strings.TrimSpace(*req.Color)
 		if color == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "Пустой color")
+			s.writeError(w, r, http.StatusBadRequest, "РџСѓСЃС‚РѕР№ color")
 			return
 		}
 		if _, err := s.pool.Exec(r.Context(), `
 			UPDATE event_categories SET color = $2 WHERE id = $1
 		`, categoryID, color); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 	}
@@ -671,7 +690,7 @@ func (s *Server) handlePatchCategory(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.QueryRow(r.Context(), `
 		SELECT id, title, color FROM event_categories WHERE id = $1
 	`, categoryID).Scan(&updated.ID, &updated.Title, &updated.Color); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, updated)
@@ -685,11 +704,11 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.QueryRow(r.Context(), `
 		SELECT EXISTS(SELECT 1 FROM event_categories WHERE id = $1 AND user_id = $2)
 	`, categoryID, userID).Scan(&exists); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if !exists {
-		httpx.WriteError(w, http.StatusNotFound, "Категория не найдена")
+		s.writeError(w, r, http.StatusNotFound, "РљР°С‚РµРіРѕСЂРёСЏ РЅРµ РЅР°Р№РґРµРЅР°")
 		return
 	}
 
@@ -697,16 +716,16 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.QueryRow(r.Context(), `
 		SELECT EXISTS(SELECT 1 FROM events WHERE category_id = $1)
 	`, categoryID).Scan(&used); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	if used {
-		httpx.WriteError(w, http.StatusConflict, "Категория используется событиями")
+		s.writeError(w, r, http.StatusConflict, "РљР°С‚РµРіРѕСЂРёСЏ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ СЃРѕР±С‹С‚РёСЏРјРё")
 		return
 	}
 
 	if _, err := s.pool.Exec(r.Context(), `DELETE FROM event_categories WHERE id = $1`, categoryID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+		s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -723,14 +742,14 @@ func (s *Server) handleGetFriendEvents(w http.ResponseWriter, r *http.Request) {
 	case dateQ != "" && fromQ == "" && toQ == "":
 		date, err := time.Parse("2006-01-02", dateQ)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректный date")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ date")
 			return
 		}
 		start := date.UTC()
 		end := start.Add(24 * time.Hour)
 		events, err := s.listEvents(r.Context(), friendID, start, end)
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		response := make([]friendDayEventResponse, 0, len(events))
@@ -749,24 +768,24 @@ func (s *Server) handleGetFriendEvents(w http.ResponseWriter, r *http.Request) {
 	case dateQ == "" && fromQ != "" && toQ != "":
 		from, err := time.Parse(time.RFC3339, fromQ)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректные даты")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°С‚С‹")
 			return
 		}
 		to, err := time.Parse(time.RFC3339, toQ)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "Некорректные даты")
+			s.writeError(w, r, http.StatusBadRequest, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°С‚С‹")
 			return
 		}
 		events, err := s.listEvents(r.Context(), friendID, from.UTC(), to.UTC())
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "Внутренняя ошибка")
+			s.writeError(w, r, http.StatusInternalServerError, "Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР°")
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, events)
 		return
 
 	default:
-		httpx.WriteError(w, http.StatusBadRequest, "Invalid query combination: use either date or from+to")
+		s.writeError(w, r, http.StatusBadRequest, "Invalid query combination: use either date or from+to")
 		return
 	}
 }
@@ -774,14 +793,14 @@ func (s *Server) handleGetFriendEvents(w http.ResponseWriter, r *http.Request) {
 func validateWeekdaysRule(scheduleType string, weekdays []int) error {
 	if scheduleType == "weekdays" {
 		if len(weekdays) == 0 {
-			return errors.New("weekdays обязателен для scheduleType=weekdays")
+			return errors.New("weekdays РѕР±СЏР·Р°С‚РµР»РµРЅ РґР»СЏ scheduleType=weekdays")
 		}
 	} else if len(weekdays) > 0 {
-		return errors.New("weekdays должен быть пустым для выбранного scheduleType")
+		return errors.New("weekdays РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј РґР»СЏ РІС‹Р±СЂР°РЅРЅРѕРіРѕ scheduleType")
 	}
 	for _, wd := range weekdays {
 		if wd < 1 || wd > 7 {
-			return errors.New("weekday должен быть от 1 до 7")
+			return errors.New("weekday РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РѕС‚ 1 РґРѕ 7")
 		}
 	}
 	return nil

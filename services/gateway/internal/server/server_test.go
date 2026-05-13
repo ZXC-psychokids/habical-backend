@@ -269,3 +269,44 @@ func TestGatewayForwardsCoreRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewayPropagatesRequestIDToDownstream(t *testing.T) {
+	const reqID = "req-12345"
+	coreServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Request-ID") != reqID {
+			http.Error(w, "missing request id", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer coreServer.Close()
+
+	cfg := config.Config{
+		JWTSecret:                "test-secret",
+		AuthURL:                  "http://auth.invalid",
+		CoreURL:                  coreServer.URL,
+		SocialURL:                "http://social.invalid",
+		HTTPClientTimeoutSeconds: 5,
+	}
+	server := New(cfg, logger.New("gateway-test"))
+
+	token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/me/tasks?date=2026-04-26", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Request-ID", reqID)
+	resp := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d, body=%s", resp.Code, string(body))
+	}
+	if got := resp.Header().Get("X-Request-ID"); got != reqID {
+		t.Fatalf("expected response X-Request-ID=%s, got %s", reqID, got)
+	}
+}
