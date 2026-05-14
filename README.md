@@ -1,52 +1,48 @@
 # Habical Backend
 
-Backend monorepo for the Habical app.
+Habical — приложение для личной продуктивности: задачи, привычки, календарные события и активность друзей.
+Этот репозиторий — Go-бэкенд: API gateway, доменные сервисы и фоновые воркеры.
 
-## Services
+## Архитектура
+- `services/gateway` (`:4010`) — единая точка входа для фронта, проверка JWT, проксирование в доменные сервисы, friend-page orchestration.
+- `services/auth` (`:4011`) — регистрация/логин, refresh/logout, профиль, настройки, аватары.
+- `services/core` (`:4012`) — таски, привычки, shared habits, события, категории, friend calendar/tasks/habits endpoints.
+- `services/social` (`:4013`) — друзья, инвайты, социальный feed, internal friendship check.
+- `services/worker` — фоновые джобы (`generate_future_tasks`, `rebuild_future_tasks`, `compute_habit_streaks`).
+- `libs/` — общие пакеты (`authjwt`, `httpx`, `logger`, `pgxutil`, `idgen`, `password`).
+- `deploy/migrations/0001_init.sql` — полная схема БД (users, tasks, habits, events, friendships, feed, tokens, background_jobs).
 
-- `gateway` on `:4010`
-- `auth` on `:4011`
-- `core` on `:4012` (participant-2 scope: events + event categories)
-- `social` on `:4013`
+Поток запроса: `Flutter -> Gateway -> Auth/Core/Social -> Postgres`.
 
-## Participant-2 scope implemented
-
-- Auth, profile, settings
-- Events and event categories
-- Friends, friend invites, feed
-- Gateway proxy and friend-page orchestration:
-  - implemented: `/users/{userId}`, `/users/{userId}/events`
-  - intentionally `501` (participant-1 dependency): `/users/{userId}/tasks`, `/users/{userId}/shared-habits`
-
-## Quick start with Docker
-
-Prerequisite: Docker with Compose plugin.
-
-1. Go to `backend` directory.
-2. Run:
+## Инструкция по запуску
+Требования: Docker + Docker Compose.
+Перед запуском нужен файл `.env` в корне `habical-backend`.
 
 ```bash
-docker compose up --build
+cd habical-backend
+make docker-up
 ```
 
-What happens:
+Поднимется:
+- `postgres`
+- `migrate` (применяет `0001_init.sql`)
+- `auth`, `core`, `social`, `worker`, `gateway`
 
-- `postgres` starts
-- `migrate` applies `deploy/migrations/0001_init.sql`
-- `auth`, `core`, `social`, `gateway` start after migration is complete
+API для фронта: `http://127.0.0.1:4010`.
 
-Gateway URL for frontend: `http://127.0.0.1:4010`
-
-## Manual local run (without Docker)
-
-1. Start PostgreSQL and create database `habical`.
-2. Apply migration `deploy/migrations/0001_init.sql`.
-3. Set env vars from `.env.example`.
-4. Run services in separate terminals:
-
+## Полезные команды
 ```bash
-go run ./services/auth/cmd/auth
-go run ./services/core/cmd/core
-go run ./services/social/cmd/social
-go run ./services/gateway/cmd/gateway
+make build
+make test
+make docker-up
+make docker-down
 ```
+
+## Конфиг (основные переменные)
+- Общие: `POSTGRES_DSN`, `JWT_SECRET`
+- Gateway: `GATEWAY_PORT`, `AUTH_URL`, `CORE_URL`, `SOCIAL_URL`
+- Auth: `AUTH_PORT`, `ACCESS_TTL_MINUTES`, `REFRESH_TTL_HOURS`, `AVATAR_STORAGE_DIR`, `AVATAR_BASE_URL`
+- Core: `CORE_PORT`
+- Social: `SOCIAL_PORT`
+- Worker: `WORKER_POLL_INTERVAL_SECONDS`, `WORKER_BATCH_SIZE`, `WORKER_RETRY_DELAY_SECONDS`, `WORKER_MAX_ATTEMPTS`
+
