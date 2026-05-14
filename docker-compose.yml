@@ -4,15 +4,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: habical
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d habical"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -22,12 +22,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN}
     volumes:
       - ./deploy/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        psql "postgres://postgres:postgres@postgres:5432/habical?sslmode=disable" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
+        psql "$POSTGRES_DSN" -v ON_ERROR_STOP=1 -f /migrations/0001_init.sql
     restart: "no"
 
   auth:
@@ -35,8 +37,8 @@ services:
       context: .
       dockerfile: deploy/docker/auth.Dockerfile
     environment:
-      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
-      JWT_SECRET: dev_secret_change_me
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      JWT_SECRET: ${JWT_SECRET}
       AUTH_PORT: 4011
       AVATAR_STORAGE_DIR: /data/avatars
       AVATAR_BASE_URL: http://localhost:4010/avatars
@@ -53,8 +55,8 @@ services:
       context: .
       dockerfile: deploy/docker/core.Dockerfile
     environment:
-      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
-      JWT_SECRET: dev_secret_change_me
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      JWT_SECRET: ${JWT_SECRET}
       CORE_PORT: 4012
     depends_on:
       migrate:
@@ -67,8 +69,8 @@ services:
       context: .
       dockerfile: deploy/docker/social.Dockerfile
     environment:
-      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
-      JWT_SECRET: dev_secret_change_me
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      JWT_SECRET: ${JWT_SECRET}
       SOCIAL_PORT: 4013
     depends_on:
       migrate:
@@ -81,7 +83,7 @@ services:
       context: .
       dockerfile: deploy/docker/worker.Dockerfile
     environment:
-      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/habical?sslmode=disable
+      POSTGRES_DSN: ${POSTGRES_DSN}
       WORKER_POLL_INTERVAL_SECONDS: "5"
       WORKER_BATCH_SIZE: "10"
       WORKER_RETRY_DELAY_SECONDS: "60"
@@ -95,7 +97,7 @@ services:
       context: .
       dockerfile: deploy/docker/gateway.Dockerfile
     environment:
-      JWT_SECRET: dev_secret_change_me
+      JWT_SECRET: ${JWT_SECRET}
       GATEWAY_PORT: 4010
       AUTH_URL: http://auth:4011
       CORE_URL: http://core:4012
