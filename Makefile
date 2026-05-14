@@ -1,10 +1,21 @@
-.PHONY: build test run-gateway run-auth run-core run-social docker-up docker-down
+.PHONY: build test vet fmt check run-gateway run-auth run-core run-social docker-up docker-down
 
 build:
 	go build ./...
 
 test:
 	go test ./...
+
+vet:
+	go vet ./...
+
+fmt:
+	gofmt -w .
+
+check:
+	go test ./...
+	go vet ./...
+	go build ./...
 
 run-gateway:
 	go run ./services/gateway/cmd/gateway

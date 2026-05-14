@@ -13,9 +13,20 @@ import (
 )
 
 type App struct {
-	repo *repository.Repository
+	repo jobRepository
 	cfg  config.Config
 	log  *slog.Logger
+}
+
+type jobRepository interface {
+	ReservePendingJobs(ctx context.Context, limit int) ([]repository.Job, error)
+	MarkJobCompleted(ctx context.Context, jobID string) error
+	MarkJobFailed(ctx context.Context, jobID string, attempts int, retryDelay time.Duration, maxAttempts int) error
+	GetHabit(ctx context.Context, habitID string) (repository.Habit, error)
+	DeleteFutureIncompleteHabitTasks(ctx context.Context, habitID string, fromDate time.Time) error
+	TaskExists(ctx context.Context, habitID string, taskDate time.Time) (bool, error)
+	NextPosition(ctx context.Context, userID string, taskDate time.Time) (int, error)
+	CreateTask(ctx context.Context, task repository.Task) error
 }
 
 type habitJobPayload struct {
@@ -28,7 +39,7 @@ type streakJobPayload struct {
 	UserID  string `json:"userId,omitempty"`
 }
 
-func New(repo *repository.Repository, cfg config.Config, log *slog.Logger) *App {
+func New(repo jobRepository, cfg config.Config, log *slog.Logger) *App {
 	return &App{repo: repo, cfg: cfg, log: log}
 }
 
