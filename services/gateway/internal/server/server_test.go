@@ -310,3 +310,216 @@ func TestGatewayPropagatesRequestIDToDownstream(t *testing.T) {
 		t.Fatalf("expected response X-Request-ID=%s, got %s", reqID, got)
 	}
 }
+
+func TestGatewayPublicAuthRoutesDoNotRequireToken(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer authServer.Close()
+
+	cfg := config.Config{
+		JWTSecret:                "test-secret",
+		AuthURL:                  authServer.URL,
+		CoreURL:                  "http://core.invalid",
+		SocialURL:                "http://social.invalid",
+		HTTPClientTimeoutSeconds: 5,
+	}
+	server := New(cfg, logger.New("gateway-test"))
+
+	paths := []string{
+		"/auth/register",
+		"/auth/login",
+		"/auth/refresh",
+		"/auth/password-reset/request",
+		"/auth/password-reset/confirm",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			resp := httptest.NewRecorder()
+
+			server.Router().ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("expected status 200 for public route %s, got %d", path, resp.Code)
+			}
+		})
+	}
+}
+
+func TestGatewayProtectedRouteReturnsUnauthorizedWithoutOrInvalidToken(t *testing.T) {
+	cfg := config.Config{
+		JWTSecret:                "test-secret",
+		AuthURL:                  "http://auth.invalid",
+		CoreURL:                  "http://core.invalid",
+		SocialURL:                "http://social.invalid",
+		HTTPClientTimeoutSeconds: 5,
+	}
+	server := New(cfg, logger.New("gateway-test"))
+
+	t.Run("without token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/me", nil)
+		resp := httptest.NewRecorder()
+		server.Router().ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", resp.Code)
+		}
+	})
+
+	t.Run("with invalid token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/me", nil)
+		req.Header.Set("Authorization", "Bearer invalid-token")
+		resp := httptest.NewRecorder()
+		server.Router().ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", resp.Code)
+		}
+	})
+}
+
+func TestGatewayProtectedRoutesWithValidTokenAreRoutedToServices(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/me" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"service":"auth"}`))
+	}))
+	defer authServer.Close()
+
+	coreServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/me/tasks" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"service":"core"}`))
+	}))
+	defer coreServer.Close()
+
+	socialServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/me/friends" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"service":"social"}`))
+	}))
+	defer socialServer.Close()
+
+	cfg := config.Config{
+		JWTSecret:                "test-secret",
+		AuthURL:                  authServer.URL,
+		CoreURL:                  coreServer.URL,
+		SocialURL:                socialServer.URL,
+		HTTPClientTimeoutSeconds: 5,
+	}
+	server := New(cfg, logger.New("gateway-test"))
+
+	token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		path      string
+		wantToken string
+	}{
+		{path: "/me", wantToken: `"service":"auth"`},
+		{path: "/me/tasks?date=2026-04-26", wantToken: `"service":"core"`},
+		{path: "/me/friends", wantToken: `"service":"social"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp := httptest.NewRecorder()
+
+			server.Router().ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("expected 200 for %s, got %d", tt.path, resp.Code)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(body), tt.wantToken) {
+				t.Fatalf("unexpected body for %s: %s", tt.path, string(body))
+			}
+		})
+	}
+}
+
+func TestGatewayDownstreamErrorsArePropagated(t *testing.T) {
+	tests := []struct {
+		name        string
+		downstream  int
+		wantGateway int
+	}{
+		{name: "400", downstream: http.StatusBadRequest, wantGateway: http.StatusBadRequest},
+		{name: "404", downstream: http.StatusNotFound, wantGateway: http.StatusNotFound},
+		{name: "500", downstream: http.StatusInternalServerError, wantGateway: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.downstream)
+				_, _ = w.Write([]byte(`{"message":"downstream"}`))
+			}))
+			defer coreServer.Close()
+
+			cfg := config.Config{
+				JWTSecret:                "test-secret",
+				AuthURL:                  "http://auth.invalid",
+				CoreURL:                  coreServer.URL,
+				SocialURL:                "http://social.invalid",
+				HTTPClientTimeoutSeconds: 5,
+			}
+			server := New(cfg, logger.New("gateway-test"))
+
+			token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/me/tasks?date=2026-04-26", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp := httptest.NewRecorder()
+
+			server.Router().ServeHTTP(resp, req)
+
+			if resp.Code != tt.wantGateway {
+				t.Fatalf("expected status %d, got %d", tt.wantGateway, resp.Code)
+			}
+		})
+	}
+}
+
+func TestGatewayReturnsBadGatewayWhenDownstreamUnavailable(t *testing.T) {
+	cfg := config.Config{
+		JWTSecret:                "test-secret",
+		AuthURL:                  "http://auth.invalid",
+		CoreURL:                  "http://127.0.0.1:1",
+		SocialURL:                "http://social.invalid",
+		HTTPClientTimeoutSeconds: 1,
+	}
+	server := New(cfg, logger.New("gateway-test"))
+
+	token, err := authjwt.IssueAccessToken("requester", cfg.JWTSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/me/tasks?date=2026-04-26", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", resp.Code)
+	}
+}
