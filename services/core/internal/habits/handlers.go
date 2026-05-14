@@ -433,7 +433,7 @@ func (h *Handler) handleDeleteHabit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listHabits(ctx context.Context, userID string) ([]habitResponse, error) {
 	rows, err := h.pool.Query(ctx, `
         SELECT h.id, h.title, h.color, h.schedule_type, h.interval_days,
-               COALESCE(array_agg(DISTINCT hw.weekday ORDER BY hw.weekday), ARRAY[]::integer[]) AS weekdays,
+               COALESCE(array_agg(DISTINCT hw.weekday ORDER BY hw.weekday) FILTER (WHERE hw.weekday IS NOT NULL), ARRAY[]::integer[]) AS weekdays,
                CASE WHEN p.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_shared,
                ou.id, ou.handle
         FROM habits h
@@ -506,7 +506,7 @@ func (h *Handler) getHabitRow(ctx context.Context, querier interface {
 	row := habitRow{}
 	err := querier.QueryRow(ctx, `
         SELECT h.id, h.title, h.color, h.schedule_type, h.interval_days,
-               COALESCE(array_agg(DISTINCT hw.weekday ORDER BY hw.weekday), ARRAY[]::integer[]) AS weekdays,
+               COALESCE(array_agg(DISTINCT hw.weekday ORDER BY hw.weekday) FILTER (WHERE hw.weekday IS NOT NULL), ARRAY[]::integer[]) AS weekdays,
                CASE WHEN p.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_shared,
                ou.id, ou.handle
         FROM habits h

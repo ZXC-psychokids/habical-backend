@@ -72,15 +72,19 @@ func HTTPLogger(log *slog.Logger) func(http.Handler) http.Handler {
 				status = http.StatusOK
 			}
 
-			log.Info(
-				"http_request",
+			logAttrs := []any{
 				"request_id", RequestIDFromContext(r.Context()),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", status,
 				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			}
+
+			if status >= http.StatusBadRequest {
+				log.Error("http_request", logAttrs...)
+			} else {
+				log.Info("http_request", logAttrs...)
+			}
 		})
 	}
 }
-
