@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -848,6 +849,12 @@ func (s *Server) getEventByID(ctx context.Context, eventID string) (eventRespons
 }
 
 func (s *Server) listEvents(ctx context.Context, userID string, from time.Time, to time.Time) ([]eventResponse, error) {
+	from = from.UTC()
+	to = to.UTC()
+	if to.Before(from) {
+		return []eventResponse{}, nil
+	}
+
 	rows, err := s.pool.Query(ctx, `
 		SELECT
 			e.id, e.title, e.starts_at, e.ends_at, e.schedule_type, e.interval_days,
@@ -857,8 +864,11 @@ func (s *Server) listEvents(ctx context.Context, userID string, from time.Time, 
 		JOIN event_categories ec ON ec.id = e.category_id
 		LEFT JOIN tasks t ON t.id = e.task_id
 		WHERE e.user_id = $1
-		  AND e.starts_at >= $2
-		  AND e.starts_at <= $3
+		  AND (
+		    (e.schedule_type = 'none' AND e.starts_at >= $2 AND e.starts_at <= $3)
+		    OR
+		    (e.schedule_type <> 'none' AND e.starts_at <= $3)
+		  )
 		ORDER BY e.starts_at ASC
 	`, userID, from, to)
 	if err != nil {
@@ -866,7 +876,7 @@ func (s *Server) listEvents(ctx context.Context, userID string, from time.Time, 
 	}
 	defer rows.Close()
 
-	out := make([]eventResponse, 0)
+	baseEvents := make([]eventResponse, 0)
 	for rows.Next() {
 		ev, err := scanEventRow(rows)
 		if err != nil {
@@ -876,8 +886,27 @@ func (s *Server) listEvents(ctx context.Context, userID string, from time.Time, 
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ev)
+		baseEvents = append(baseEvents, ev)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]eventResponse, 0, len(baseEvents))
+	for _, base := range baseEvents {
+		out = append(out, expandEventOccurrences(base, from, to)...)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].StartsAt.Equal(out[j].StartsAt) {
+			return out[i].StartsAt.Before(out[j].StartsAt)
+		}
+		if !out[i].EndsAt.Equal(out[j].EndsAt) {
+			return out[i].EndsAt.Before(out[j].EndsAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+
 	return out, nil
 }
 
@@ -915,4 +944,226 @@ func (s *Server) getEventWeekdays(ctx context.Context, eventID string) ([]int, e
 		out = append(out, wd)
 	}
 	return out, nil
+}
+
+func expandEventOccurrences(base eventResponse, from time.Time, to time.Time) []eventResponse {
+	from = from.UTC()
+	to = to.UTC()
+	baseStart := base.StartsAt.UTC()
+	baseEnd := base.EndsAt.UTC()
+	duration := baseEnd.Sub(baseStart)
+	if duration <= 0 {
+		return []eventResponse{}
+	}
+
+	switch base.ScheduleType {
+	case "none":
+		if baseStart.Before(from) || baseStart.After(to) {
+			return []eventResponse{}
+		}
+		return []eventResponse{cloneEventAt(base, baseStart, baseEnd)}
+	case "daily":
+		return expandIntervalOccurrences(base, from, to, 1, duration)
+	case "interval":
+		intervalDays := base.IntervalDays
+		if intervalDays <= 0 {
+			intervalDays = 1
+		}
+		return expandIntervalOccurrences(base, from, to, intervalDays, duration)
+	case "monthly":
+		intervalMonths := base.IntervalDays
+		if intervalMonths <= 0 {
+			intervalMonths = 1
+		}
+		return expandMonthlyOccurrences(base, from, to, intervalMonths, duration)
+	case "weekdays":
+		return expandWeekdayOccurrences(base, from, to, duration)
+	default:
+		if baseStart.Before(from) || baseStart.After(to) {
+			return []eventResponse{}
+		}
+		return []eventResponse{cloneEventAt(base, baseStart, baseEnd)}
+	}
+}
+
+func expandIntervalOccurrences(base eventResponse, from time.Time, to time.Time, intervalDays int, duration time.Duration) []eventResponse {
+	baseStart := base.StartsAt.UTC()
+	if baseStart.After(to) {
+		return []eventResponse{}
+	}
+
+	if intervalDays <= 0 {
+		intervalDays = 1
+	}
+
+	candidate := baseStart
+	if candidate.Before(from) {
+		stepDuration := time.Duration(intervalDays) * 24 * time.Hour
+		steps := int(from.Sub(candidate) / stepDuration)
+		candidate = candidate.AddDate(0, 0, steps*intervalDays)
+		if candidate.Before(from) {
+			candidate = candidate.AddDate(0, 0, intervalDays)
+		}
+	}
+
+	out := make([]eventResponse, 0)
+	for !candidate.After(to) {
+		out = append(out, cloneEventAt(base, candidate, candidate.Add(duration)))
+		candidate = candidate.AddDate(0, 0, intervalDays)
+	}
+	return out
+}
+
+func expandMonthlyOccurrences(base eventResponse, from time.Time, to time.Time, intervalMonths int, duration time.Duration) []eventResponse {
+	baseStart := base.StartsAt.UTC()
+	if baseStart.After(to) {
+		return []eventResponse{}
+	}
+
+	if intervalMonths <= 0 {
+		intervalMonths = 1
+	}
+
+	candidate := baseStart
+	if candidate.Before(from) {
+		monthsDiff := (from.Year()-baseStart.Year())*12 + int(from.Month()) - int(baseStart.Month())
+		if monthsDiff < 0 {
+			monthsDiff = 0
+		}
+		steps := monthsDiff / intervalMonths
+		candidate = addMonthsClampedUTC(baseStart, steps*intervalMonths)
+		if candidate.Before(from) {
+			candidate = addMonthsClampedUTC(candidate, intervalMonths)
+		}
+	}
+
+	out := make([]eventResponse, 0)
+	for !candidate.After(to) {
+		out = append(out, cloneEventAt(base, candidate, candidate.Add(duration)))
+		candidate = addMonthsClampedUTC(candidate, intervalMonths)
+	}
+	return out
+}
+
+func expandWeekdayOccurrences(base eventResponse, from time.Time, to time.Time, duration time.Duration) []eventResponse {
+	if len(base.Weekdays) == 0 {
+		return []eventResponse{}
+	}
+
+	baseStart := base.StartsAt.UTC()
+	baseDay := dateOnlyUTC(baseStart)
+	fromDay := dateOnlyUTC(from)
+	toDay := dateOnlyUTC(to)
+	if toDay.Before(baseDay) {
+		return []eventResponse{}
+	}
+	if fromDay.Before(baseDay) {
+		fromDay = baseDay
+	}
+
+	weekdaySet := make(map[int]struct{}, len(base.Weekdays))
+	for _, wd := range base.Weekdays {
+		weekdaySet[wd] = struct{}{}
+	}
+
+	weeksInterval := base.IntervalDays
+	if weeksInterval <= 0 {
+		weeksInterval = 1
+	}
+	weekAnchor := mondayOfISOWeek(baseDay)
+
+	out := make([]eventResponse, 0)
+	for day := fromDay; !day.After(toDay); day = day.AddDate(0, 0, 1) {
+		if _, ok := weekdaySet[weekdayISO(day)]; !ok {
+			continue
+		}
+
+		if weeksInterval > 1 {
+			weekIndex := int(day.Sub(weekAnchor).Hours()/24) / 7
+			if weekIndex%weeksInterval != 0 {
+				continue
+			}
+		}
+
+		candidate := time.Date(
+			day.Year(),
+			day.Month(),
+			day.Day(),
+			baseStart.Hour(),
+			baseStart.Minute(),
+			baseStart.Second(),
+			baseStart.Nanosecond(),
+			time.UTC,
+		)
+		if candidate.Before(baseStart) || candidate.Before(from) || candidate.After(to) {
+			continue
+		}
+		out = append(out, cloneEventAt(base, candidate, candidate.Add(duration)))
+	}
+	return out
+}
+
+func cloneEventAt(base eventResponse, startsAt time.Time, endsAt time.Time) eventResponse {
+	cloned := base
+	cloned.StartsAt = startsAt.UTC()
+	cloned.EndsAt = endsAt.UTC()
+	cloned.Weekdays = append([]int(nil), base.Weekdays...)
+	if base.Task != nil {
+		task := *base.Task
+		cloned.Task = &task
+	}
+	return cloned
+}
+
+func addMonthsClampedUTC(value time.Time, months int) time.Time {
+	value = value.UTC()
+	targetMonth := time.Date(
+		value.Year(),
+		value.Month(),
+		1,
+		value.Hour(),
+		value.Minute(),
+		value.Second(),
+		value.Nanosecond(),
+		time.UTC,
+	).AddDate(0, months, 0)
+
+	lastDay := daysInMonth(targetMonth.Year(), targetMonth.Month())
+	day := value.Day()
+	if day > lastDay {
+		day = lastDay
+	}
+
+	return time.Date(
+		targetMonth.Year(),
+		targetMonth.Month(),
+		day,
+		value.Hour(),
+		value.Minute(),
+		value.Second(),
+		value.Nanosecond(),
+		time.UTC,
+	)
+}
+
+func daysInMonth(year int, month time.Month) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+func dateOnlyUTC(value time.Time) time.Time {
+	value = value.UTC()
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func mondayOfISOWeek(value time.Time) time.Time {
+	day := dateOnlyUTC(value)
+	weekday := weekdayISO(day)
+	return day.AddDate(0, 0, -(weekday - 1))
+}
+
+func weekdayISO(value time.Time) int {
+	if value.Weekday() == time.Sunday {
+		return 7
+	}
+	return int(value.Weekday())
 }
